@@ -1,0 +1,13 @@
+.env
+
+venv/
+
+*.xlsx
+
+barcode_images*
+
+output*
+
+config*
+
+.json
