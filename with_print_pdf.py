@@ -675,8 +675,8 @@ def combine_templates(header_footer_path, content_path, signature_img_path, word
         #     para.paragraph_format.space_after = Pt(0)
          # ✅ Set top margin to 1.04 inches
         for section in header_footer_doc.sections:
-            section.header_distance = Inches(0.1)
-            section.footer_distance = Inches(0.1)
+            section.header_distance = Inches(0.2)
+            section.footer_distance = Inches(0.2)
 
         if signature_img_path and Path(signature_img_path).exists():
             with TemporaryDirectory() as temp_dir:
@@ -1458,12 +1458,6 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
             yield json.dumps({'error': 'No valid rows found (LEADS_CHNAME missing)'}) + '\n'
             return
 
-        # Log available FINAL_AREA values for debugging
-        available_areas = valid_rows['FINAL_AREA'].unique().tolist()
-        logger.info(f"Available FINAL_AREA values: {available_areas}")
-        if 'NCR' not in available_areas:
-            logger.warning("No rows found with FINAL_AREA 'NCR' in the input data")
-
         logger.info(f"Processing {total_records} records across {len(valid_rows.groupby('FINAL_AREA'))} FINAL_AREA groups")
         
         # Get user info for audit trail
@@ -1485,16 +1479,9 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
         # Get selected output format
         output_format = SESSION_STATE.get('output_format', 'zip')  # Default to zip if not set
         
-
-
-        # Log placeholders for debugging
-        placeholders = SESSION_STATE.get('placeholders', [])
-        logger.info(f"Placeholders in template: {placeholders}")
-
         with TemporaryDirectory() as temp_zip_dir:
             zip_path = Path(temp_zip_dir) / "final_area_pdfs.zip"
-            if output_format == "zip":
-                zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
+            zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
             try:
                 with TemporaryDirectory() as temp_dir:
                     temp_base_path = Path(temp_dir) / "base_template.docx"
@@ -1512,8 +1499,6 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                     # Store processed accounts in batches
                     account_batch = []
                     batch_size = 100
-                    # Store DOCX files for print format
-                    area_docx_files = {}  # Dictionary to track DOCX files by FINAL_AREA
                     
                     for final_area, group_df in valid_rows.groupby('FINAL_AREA'):
                         logger.debug(f"Processing FINAL_AREA: {final_area} ({len(group_df)} records)")
@@ -1521,9 +1506,10 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                         os.makedirs(area_dir, exist_ok=True)
                         docx_files = []
                         temp_files = []
-                        dl_pdf_merger = PdfMerger() if output_format == "zip" and SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"] else None
-                        transmittal_pdf_merger = PdfMerger() if output_format == "zip" and SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"] else None
+                        dl_pdf_merger = PdfMerger() if SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"] else None
+                        transmittal_pdf_merger = PdfMerger() if SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"] else None
                         record_count = len(group_df)
+                        selected_mode = SESSION_STATE.get('selected_mode')
                         try:
                             if SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"]:
                                 for idx, row in group_df.iterrows():
@@ -1545,24 +1531,17 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                         conn.commit()
                                         account_batch = []
                                     
-                                    # Create mapping with normalized placeholders
                                     barcode_buffer = None
                                     if barcode_value := row.get('DL_CODE', ''):
                                         barcode_buffer = generate_barcode(barcode_value)
                                     amount_words = amount_to_words(row.get('amount', '0.00'))
-                                    mapping = {
-                                        f"«{col.upper()}»": str(row[col]) for col in dataframe.columns if pd.notnull(row[col])
-                                    }
+                                    mapping = {f"«{col.upper()}»": row[col] for col in dataframe.columns if pd.notnull(row[col])}
                                     mapping.update({
                                         "«IMAGE_BARCODE»": barcode_buffer or "",
                                         "«DL_DATE»": today_date,
                                         "«AMOUNT_ABBR»": amount_words,
                                         "«IMAGE_SIGNATURE»": SESSION_STATE.get('files_to_cleanup', [])[0] or ""
                                     })
-                                    
-                                    # Log mapping for debugging
-                                    logger.debug(f"Mapping for row {idx} in {final_area}: {mapping}")
-
                                     filled_doc = Document(temp_base_path)
                                     filled_doc = fill_template(filled_doc, mapping, barcode_buffer)
                                     if filled_doc:
@@ -1570,14 +1549,7 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                         docx_output = area_dir / f"{unique_name}.docx"
                                         filled_doc.save(docx_output)
                                         docx_files.append(str(docx_output))
-                                        if output_format == "print":
-                                            if final_area not in area_docx_files:
-                                                area_docx_files[final_area] = []
-                                            area_docx_files[final_area].append(str(docx_output))
-                                        else:
-                                            temp_files.append(str(docx_output))
-                                    else:
-                                        logger.warning(f"Failed to fill template for row {idx} in {final_area}")
+                                        temp_files.append(str(docx_output))
                                     processed_records += 1
                                     progress = (processed_records / total_records) * 100
                                     yield json.dumps({
@@ -1587,6 +1559,7 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                     await asyncio.sleep(0)
 
                             if SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"]:
+                                # If we're only doing transmittal, we need to store the account data here
                                 if SESSION_STATE.get('selected_mode') == "Transmittal Only":
                                     for _, row in group_df.iterrows():
                                         account_batch.append((
@@ -1596,6 +1569,8 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                             row.get('DL_ADDRESS', ''),
                                             row.get('FINAL_AREA', '')
                                         ))
+                                        
+                                        # Process batch if it reaches the batch size
                                         if len(account_batch) >= batch_size:
                                             cursor.executemany(
                                                 "INSERT INTO processed_accounts (audit_id, dl_code, leads_chname, dl_address, final_area) VALUES (?, ?, ?, ?, ?)",
@@ -1611,51 +1586,37 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                         transmittal_docx_output = area_dir / f"{unique_name}.docx"
                                         transmittal_doc.save(transmittal_docx_output)
                                         docx_files.append(str(transmittal_docx_output))
-                                        if output_format == "print":
-                                            if final_area not in area_docx_files:
-                                                area_docx_files[final_area] = []
-                                            area_docx_files[final_area].append(str(transmittal_docx_output))
-                                        else:
-                                            temp_files.append(str(transmittal_docx_output))
+                                        temp_files.append(str(transmittal_docx_output))
 
                             if docx_files:
-                                if output_format == "zip":
-                                    logger.debug(f"Converting {len(docx_files)} DOCX files for {final_area}")
-                                    yield json.dumps({
-                                        'progress': (processed_records / total_records) * 100,
-                                        'message': f"Converting {len(docx_files)} documents to PDF for {final_area}..."
-                                    }) + '\n'
-                                    await asyncio.sleep(0)
-                                    pdf_files = batch_convert_libreoffice(docx_files, area_dir, batch_size=300)
-                                    if pdf_files:
-                                        for pdf_file in pdf_files:
-                                            if "transmittal" in Path(pdf_file).name and transmittal_pdf_merger:
-                                                transmittal_pdf_merger.append(pdf_file)
-                                            elif "dl" in Path(pdf_file).name and dl_pdf_merger:
-                                                dl_pdf_merger.append(pdf_file)
-                                        if dl_pdf_merger and SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"]:
-                                            dl_merged_path = area_dir / f"{final_area}_DL.pdf"
-                                            with open(dl_merged_path, 'wb') as output_file:
-                                                dl_pdf_merger.write(output_file)
-                                            zipf.write(dl_merged_path, f"{final_area}_DL.pdf")
-                                            logger.info(f"Created DL PDF for {final_area}: {dl_merged_path}")
-                                        if transmittal_pdf_merger and SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"]:
-                                            transmittal_merged_path = area_dir / f"{final_area}_Transmittal.pdf"
-                                            with open(transmittal_merged_path, 'wb') as output_file:
-                                                transmittal_pdf_merger.write(output_file)
-                                            zipf.write(transmittal_merged_path, f"{final_area}_Transmittal.pdf")
-                                            logger.info(f"Created Transmittal PDF for {final_area}: {transmittal_merged_path}")
-                                    else:
-                                        logger.warning(f"No PDFs generated for {final_area}")
-                                    cleanup_files(temp_files)
-                                else:  # output_format == "print"
-                                    logger.debug(f"Prepared {len(docx_files)} DOCX files for printing in {final_area}")
-                                    yield json.dumps({
-                                        'progress': (processed_records / total_records) * 100,
-                                        'message': f"Prepared {len(docx_files)} DOCX files for printing in {final_area}"
-                                    }) + '\n'
-                                    await asyncio.sleep(0)
-                                    # Do not clean up DOCX files here for print format
+                                logger.debug(f"Converting {len(docx_files)} DOCX files for {final_area}")
+                                yield json.dumps({
+                                    'progress': (processed_records / total_records) * 100,
+                                    'message': f"Converting {len(docx_files)} documents to PDF for {final_area}..."
+                                }) + '\n'
+                                await asyncio.sleep(0)
+                                pdf_files = batch_convert_libreoffice(docx_files, area_dir, batch_size=300)
+                                if pdf_files:
+                                    for pdf_file in pdf_files:
+                                        if "transmittal" in Path(pdf_file).name and transmittal_pdf_merger:
+                                            transmittal_pdf_merger.append(pdf_file)
+                                        elif "dl" in Path(pdf_file).name and dl_pdf_merger:
+                                            dl_pdf_merger.append(pdf_file)
+                                    if dl_pdf_merger and SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"]:
+                                        dl_merged_path = area_dir / f"{final_area}_DL.pdf"
+                                        with open(dl_merged_path, 'wb') as output_file:
+                                            dl_pdf_merger.write(output_file)
+                                        zipf.write(dl_merged_path, f"{final_area}_DL.pdf")
+                                        logger.info(f"Created DL PDF for {final_area}: {dl_merged_path}")
+                                    if transmittal_pdf_merger and SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"]:
+                                        transmittal_merged_path = area_dir / f"{final_area}_Transmittal.pdf"
+                                        with open(transmittal_merged_path, 'wb') as output_file:
+                                            transmittal_pdf_merger.write(output_file)
+                                        zipf.write(transmittal_merged_path, f"{final_area}_Transmittal.pdf")
+                                        logger.info(f"Created Transmittal PDF for {final_area}: {transmittal_merged_path}")
+                                else:
+                                    logger.warning(f"No PDFs generated for {final_area}")
+                                cleanup_files(temp_files)
                         finally:
                             if dl_pdf_merger:
                                 dl_pdf_merger.close()
@@ -1672,14 +1633,12 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                     
                     conn.close()
                     
-                    if output_format == "zip":
-                        zipf.close()
-                        zipf = None
-                        final_zip_path = OUTPUT_DIR / "final_area_pdfs.zip"
-                        shutil.move(str(zip_path), str(final_zip_path))
-                        SESSION_STATE['zip_path'] = str(final_zip_path)
-                        SESSION_STATE['files_to_cleanup'].append(str(final_zip_path))
-                    
+                    zipf.close()
+                    zipf = None
+                    final_zip_path = OUTPUT_DIR / "final_area_pdfs.zip"
+                    shutil.move(str(zip_path), str(final_zip_path))
+                    SESSION_STATE['zip_path'] = str(final_zip_path)
+                    SESSION_STATE['files_to_cleanup'].append(str(final_zip_path))
                     total_time = time.time() - start_time
                     
                     if output_format == "zip":
@@ -1691,148 +1650,19 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                     else:  # print format
                         yield json.dumps({
                             'progress': 100,
-                            'message': f"Processing complete! Prepared {sum(len(files) for files in area_docx_files.values())} DOCX files for {len(valid_rows.groupby('FINAL_AREA'))} FINAL_AREA groups in {total_time:.1f}s",
+                            'message': f"Processing complete! Generated PDFs for {len(valid_rows.groupby('FINAL_AREA'))} FINAL_AREA groups in {total_time:.1f}s",
                             'print_ready': True,
-                            'areas': list(valid_rows.groupby('FINAL_AREA').groups.keys()),
-                            'docx_files': {area: files for area, files in area_docx_files.items()}
+                            'areas': list(valid_rows.groupby('FINAL_AREA').groups.keys())
                         }) + '\n'
             except Exception as e:
-                logger.error(f"Error during processing: {e}")
-                yield json.dumps({'error': f'Processing failed: {str(e)}'}) + '\n'
+                logger.error(f"Error during PDF generation: {e}")
+                yield json.dumps({'error': f'PDF generation failed: {str(e)}'}) + '\n'
             finally:
                 if zipf:
                     zipf.close()
     except Exception as e:
         logger.error(f"Error in generate_pdfs_stream: {e}")
         yield json.dumps({'error': f'Processing failed: {str(e)}'}) + '\n'
-
-def print_docx_to_specific_printer(docx_files, printer_name=None):
-    """Print DOCX files to a specific printer using Word"""
-    try:
-        pythoncom.CoInitialize()
-        word_app = win32com.client.DispatchEx("Word.Application")
-        word_app.Visible = False
-        word_app.DisplayAlerts = False
-        
-        try:
-            for docx_file in docx_files:
-                doc = word_app.Documents.Open(str(Path(docx_file).absolute()))
-                try:
-                    if printer_name:
-                        # Set specific printer
-                        word_app.ActivePrinter = printer_name
-                    # Print the document
-                    doc.PrintOut()
-                    logger.info(f"Printed {docx_file} to {printer_name or 'default printer'}")
-                finally:
-                    doc.Close(SaveChanges=False)
-        finally:
-            word_app.Quit()
-            pythoncom.CoUninitialize()
-        return True
-    except Exception as e:
-        logger.error(f"Failed to print DOCX files to {printer_name}: {e}")
-        return False
-def normalize_margins(doc_path):
-    doc = Document(doc_path)
-    for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
-    doc.save(doc_path)
-def print_to_specific_printer_docx(docx_files, printer_name):
-    """Print DOCX files to a specific printer using Microsoft Word"""
-    try:
-        pythoncom.CoInitialize()
-        word_app = win32com.client.DispatchEx("Word.Application")
-        word_app.Visible = False
-        word_app.DisplayAlerts = 0  # wdAlertsNone
-        try:
-            for docx_file in docx_files:
-                # Normalize margins before opening in Word
-                normalize_margins(docx_file)
-
-                doc = word_app.Documents.Open(str(Path(docx_file).absolute()))
-                try:
-                    word_app.ActivePrinter = printer_name
-                    doc.PrintOut(
-                        Background=True,
-                        Copies=1,
-                        Collate=True
-                    )
-                    logger.info(f"Printed DOCX file: {docx_file} to {printer_name}")
-                finally:
-                    doc.Close(SaveChanges=False)
-        finally:
-            word_app.Quit()
-            pythoncom.CoUninitialize()
-        return True
-    except Exception as e:
-        logger.error(f"Failed to print DOCX to {printer_name}: {e}")
-        return False
-
-@app.get("/api/print_files/{area}")
-async def print_files(area: str, printer: str = None):
-    area_dir = OUTPUT_DIR / f"{area}"
-    if not area_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Directory for area {area} not found")
-    
-    # Look for DOCX files if output_format is print
-    if SESSION_STATE.get('output_format') == "print":
-        docx_files = list(area_dir.glob("*.docx"))
-        if not docx_files:
-            raise HTTPException(status_code=404, detail=f"No DOCX files found for area {area}")
-        
-        try:
-            if printer:
-                # Print to specific printer
-                success = print_to_specific_printer_docx(docx_files, printer)
-                if not success:
-                    raise HTTPException(status_code=500, detail=f"Failed to print to {printer}")
-            else:
-                # Use default printer
-                default_printer = win32print.GetDefaultPrinter()
-                success = print_to_specific_printer_docx(docx_files, default_printer)
-                if not success:
-                    raise HTTPException(status_code=500, detail=f"Failed to print to default printer")
-            
-            return {"success": True, "message": f"Printed {len(docx_files)} DOCX files for area {area}" + (f" to {printer}" if printer else " to default printer")}
-        except Exception as e:
-            logger.error(f"Failed to print DOCX files for area {area}: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to print DOCX files: {str(e)}")
-    else:
-        # Existing PDF printing logic
-        pdf_files = list(area_dir.glob("*.pdf"))
-        if not pdf_files:
-            raise HTTPException(status_code=404, detail=f"No PDF files found for area {area}")
-        
-        try:
-            if printer:
-                # Print to specific printer
-                success = print_to_specific_printer(pdf_files, printer)
-                if not success:
-                    raise HTTPException(status_code=500, detail=f"Failed to print to {printer}")
-            else:
-                # Use default printer
-                for pdf_file in pdf_files:
-                    subprocess.run(["SumatraPDF", "-print-to-default", str(pdf_file)], 
-                                  check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            
-            return {"success": True, "message": f"Printed {len(pdf_files)} PDF files for area {area}" + (f" to {printer}" if printer else " to default printer")}
-        except Exception as e:
-            logger.error(f"Failed to print PDF files for area {area}: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to print PDF files: {str(e)}")
-
-@app.post("/api/cleanup")
-async def cleanup():
-    try:
-        # Enhanced cleanup that resets everything
-        reset_session_state()
-        return {"success": True, "message": "Files cleaned up and session reset successfully"}
-    except Exception as e:
-        logger.error(f"Cleanup failed: {e}")
-        return {"success": False, "detail": str(e)}
 
 @app.post("/api/generate_pdfs")
 async def generate_pdfs(file: UploadFile = File(...), user_info: dict = Depends(get_current_user)):
@@ -1890,6 +1720,43 @@ async def get_printers(user_info: dict = Depends(get_current_user)):
     """Get list of available printers"""
     printers = get_available_printers()
     return {"printers": printers}
+
+@app.get("/api/print_files/{area}")
+async def print_files(area: str, printer: str = None):
+    area_dir = OUTPUT_DIR / f"{area}"
+    if not area_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Files for area {area} not found")
+    
+    pdf_files = list(area_dir.glob("*.pdf"))
+    if not pdf_files:
+        raise HTTPException(status_code=404, detail=f"No PDF files found for area {area}")
+    
+    try:
+        if printer:
+            # Print to specific printer
+            success = print_to_specific_printer(pdf_files, printer)
+            if not success:
+                raise HTTPException(status_code=500, detail=f"Failed to print to {printer}")
+        else:
+            # Use default printer (existing logic)
+            for pdf_file in pdf_files:
+                subprocess.run(["SumatraPDF", "-print-to-default", str(pdf_file)], 
+                              check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        
+        return {"success": True, "message": f"Printed {len(pdf_files)} files for area {area}" + (f" to {printer}" if printer else " to default printer")}
+    except Exception as e:
+        logger.error(f"Failed to print files for area {area}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to print files: {str(e)}")
+
+@app.post("/api/cleanup")
+async def cleanup():
+    try:
+        # Enhanced cleanup that resets everything
+        reset_session_state()
+        return {"success": True, "message": "Files cleaned up and session reset successfully"}
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        return {"success": False, "detail": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

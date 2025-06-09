@@ -158,6 +158,49 @@
             <main class="flex-1 p-4 md:p-6 space-y-6">
                 <!-- DL Generator Section -->
                 <div id="dlGeneratorSection" class="space-y-6">
+                    <!-- Output Format Selection Card -->
+                    <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6 mt-6">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="w-10 h-10 bg-secondary bg-opacity-10 rounded-lg flex items-center justify-center">
+                                <svg class="w-5 h-5 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                                    </path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-text-primary">Output Format</h3>
+                                <p class="text-sm text-text-secondary">Choose how you want to receive the generated documents</p>
+                            </div>
+                        </div>
+                        <select id="outputFormatSelect"
+                            class="w-full p-3 border border-border-medium rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-surface">
+                            <option value="">Select Output Format</option>
+                            <option value="zip">Download as ZIP file</option>
+                            <option value="print">Print directly</option>
+                        </select>
+                        
+                        <!-- Format info messages -->
+                        <div id="zipFormatInfo" class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <p class="text-sm text-blue-700">Documents will be packaged in a ZIP file for download.</p>
+                            </div>
+                        </div>
+                        
+                        <div id="printFormatInfo" class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 hidden">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                        d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                            </svg>
+                                <p class="text-sm text-blue-700">Documents will be sent to your selected printer by area. You can choose from available printers.</p>
+                            </div>
+                        </div>
+                    </div>
                     <!-- Mode Selection Card -->
                     <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6">
                         <div class="flex items-center gap-3 mb-4">
@@ -663,7 +706,7 @@
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
                                                         stroke-width="2"
-                                                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                                                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 2 0 01-2-2z">
                                                     </path>
                                                 </svg>
                                                 Total Accounts

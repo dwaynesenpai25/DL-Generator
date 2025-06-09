@@ -5,6 +5,8 @@ let isProcessing = false // Track processing state
 // Initialize UI and check session
 document.addEventListener("DOMContentLoaded", async () => {
   showSection("dlGeneratorSection")
+  // Hide mode selection initially until output format is selected
+  document.querySelector(".card:has(#modeSelect)").classList.add("hidden")
   setupMobileMenu()
   setupFolderSelectionButtons()
   const urlParams = new URLSearchParams(window.location.search)
@@ -60,7 +62,15 @@ function setupFolderSelectionButtons() {
 
 // Function to disable/enable all input fields
 function toggleInputFields(disabled) {
-  const inputs = ["modeSelect", "folderSelect", "dlTypeSelect", "templateSelect", "excelUpload", "generateButton"]
+  const inputs = [
+    "modeSelect",
+    "folderSelect",
+    "dlTypeSelect",
+    "templateSelect",
+    "excelUpload",
+    "generateButton",
+    "outputFormatSelect",
+  ]
 
   inputs.forEach((id) => {
     const element = document.getElementById(id)
@@ -293,6 +303,9 @@ function showSection(sectionId) {
 // Reset UI
 function resetUI() {
   document.getElementById("modeSelect").value = ""
+  document.getElementById("outputFormatSelect").value = "zip" // Reset to default
+  document.getElementById("printFormatInfo").classList.add("hidden")
+  document.getElementById("zipFormatInfo").classList.remove("hidden")
   document.getElementById("selectionSection").classList.add("hidden")
   document.getElementById("folderSelect").innerHTML = '<option value="">Select Folder</option>'
   document.getElementById("dlTypeSelect").innerHTML = '<option value="">Select DL Type</option>'
@@ -312,6 +325,8 @@ function resetUI() {
   // document.getElementById("templatecontentStatus").classList.add("hidden")
   document.getElementById("templateCombinedAlert").classList.add("hidden")
   document.getElementById("excelLoadingOverlay").classList.add("hidden")
+  document.getElementById("outputFormatSelect").value = "" // Reset to no selection
+  document.querySelector(".card:has(#modeSelect)").classList.add("hidden") // Hide mode selection
 
   // Reset processing state and re-enable inputs
   isProcessing = false
@@ -1285,6 +1300,48 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
   }
 })
 
+// Output Format Selection
+document.getElementById("outputFormatSelect").addEventListener("change", async (e) => {
+  const format = e.target.value
+  if (!format) {
+    // Hide mode selection if no format is selected
+    document.querySelector(".card:has(#modeSelect)").classList.add("hidden")
+    return
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/set_output_format`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format }),
+      credentials: "include",
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin()
+        return
+      }
+      const errorData = await response.json()
+      throw new Error(errorData.detail || "Failed to set output format")
+    }
+
+    // Show mode selection after output format is selected
+    document.querySelector(".card:has(#modeSelect)").classList.remove("hidden")
+
+    // Update UI based on selected format
+    if (format === "print") {
+      document.getElementById("printFormatInfo").classList.remove("hidden")
+      document.getElementById("zipFormatInfo").classList.add("hidden")
+    } else {
+      document.getElementById("printFormatInfo").classList.add("hidden")
+      document.getElementById("zipFormatInfo").classList.remove("hidden")
+    }
+  } catch (error) {
+    showError("Failed to set output format. Please try again.")
+  }
+})
+
 document.getElementById("folderSelect").addEventListener("change", (e) => {
   if (e.target.value) {
     fetchDLTypes(e.target.value)
@@ -1450,6 +1507,7 @@ document.getElementById("generateButton").addEventListener("click", async () => 
             progressBar.style.width = `${data.progress}%`
             progressText.textContent = data.message
             lastUpdate = Date.now()
+
             if (data.download_ready) {
               resultSection.classList.remove("hidden")
               downloadButton.classList.remove("hidden")
@@ -1457,6 +1515,160 @@ document.getElementById("generateButton").addEventListener("click", async () => 
               downloadButton.onclick = () => {
                 window.location.href = `${API_BASE}/download_zip`
               }
+            }
+
+            // Load available printers
+            async function loadAvailablePrinters() {
+              try {
+                const response = await fetch(`${API_BASE}/printers`, {
+                  credentials: "include",
+                })
+                if (response.ok) {
+                  const data = await response.json()
+                  return data.printers
+                } else {
+                  console.error("Failed to load printers:", response.status)
+                  return []
+                }
+              } catch (error) {
+                console.error("Failed to load printers:", error)
+                return []
+              }
+            }
+
+            // Handle print-ready response (replace the existing print-ready handling)
+            if (data.print_ready) {
+              resultSection.classList.remove("hidden")
+              cleanupButton.classList.remove("hidden")
+
+              // Load available printers
+              const printers = await loadAvailablePrinters()
+
+              // Create area selection for printing
+              const printAreaSelect = document.createElement("select")
+              printAreaSelect.id = "printAreaSelect"
+              printAreaSelect.className = "p-2 border border-border-medium rounded-lg mr-2"
+
+              // Add options for each area
+              printAreaSelect.innerHTML = '<option value="">Select area to print</option>'
+              data.areas.forEach((area) => {
+                const option = document.createElement("option")
+                option.value = area
+                option.textContent = area
+                printAreaSelect.appendChild(option)
+              })
+
+              // Create printer selection dropdown
+              const printerSelect = document.createElement("select")
+              printerSelect.id = "printerSelect"
+              printerSelect.className = "p-2 border border-border-medium rounded-lg mr-2"
+
+              // Add printer options
+              printerSelect.innerHTML = '<option value="">Default Printer</option>'
+              printers.forEach((printer) => {
+                const option = document.createElement("option")
+                option.value = printer.name
+                option.textContent = printer.name + (printer.is_default ? " (Default)" : "")
+                if (printer.is_default) {
+                  option.selected = true
+                }
+                printerSelect.appendChild(option)
+              })
+
+              // Create print button
+              const printButton = document.createElement("button")
+              printButton.id = "printButton"
+              printButton.className =
+                "btn bg-primary hover:bg-primary-dark text-white py-2 px-4 rounded-lg font-medium flex items-center gap-2"
+              printButton.innerHTML = `
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+    </svg>
+    Print Selected Area
+  `
+
+              // Add event listener for print button
+              printButton.addEventListener("click", async () => {
+                const selectedArea = printAreaSelect.value
+                const selectedPrinter = printerSelect.value
+
+                if (!selectedArea) {
+                  showError("Please select an area to print")
+                  return
+                }
+
+                try {
+                  printButton.disabled = true
+                  printButton.innerHTML = `
+        <div class="loading-spinner-sm"></div>
+        Printing...
+      `
+
+                  // Build URL with printer parameter if selected
+                  let printUrl = `${API_BASE}/print_files/${selectedArea}`
+                  if (selectedPrinter) {
+                    printUrl += `?printer=${encodeURIComponent(selectedPrinter)}`
+                  }
+
+                  const response = await fetch(printUrl, {
+                    credentials: "include",
+                  })
+
+                  if (!response.ok) {
+                    const errorData = await response.json()
+                    throw new Error(errorData.detail || "Failed to print files")
+                  }
+
+                  const result = await response.json()
+                  showSuccess(result.message)
+                } catch (error) {
+                  showError(`Failed to print: ${error.message}`)
+                } finally {
+                  printButton.disabled = false
+                  printButton.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+        </svg>
+        Print Selected Area
+      `
+                }
+              })
+
+              // Add to result section with improved layout
+              const printContainer = document.createElement("div")
+              printContainer.className = "mt-4 space-y-3"
+
+              // Create labels and controls
+              const areaLabel = document.createElement("label")
+              areaLabel.className = "block text-sm font-medium text-text-secondary"
+              areaLabel.textContent = "Select Area:"
+
+              const printerLabel = document.createElement("label")
+              printerLabel.className = "block text-sm font-medium text-text-secondary"
+              printerLabel.textContent = "Select Printer:"
+
+              const controlsContainer = document.createElement("div")
+              controlsContainer.className = "flex flex-col sm:flex-row gap-3 items-start sm:items-end"
+
+              const areaContainer = document.createElement("div")
+              areaContainer.className = "flex-1"
+              areaContainer.appendChild(areaLabel)
+              areaContainer.appendChild(printAreaSelect)
+
+              const printerContainer = document.createElement("div")
+              printerContainer.className = "flex-1"
+              printerContainer.appendChild(printerLabel)
+              printerContainer.appendChild(printerSelect)
+
+              const buttonContainer = document.createElement("div")
+              buttonContainer.appendChild(printButton)
+
+              controlsContainer.appendChild(areaContainer)
+              controlsContainer.appendChild(printerContainer)
+              controlsContainer.appendChild(buttonContainer)
+
+              printContainer.appendChild(controlsContainer)
+              resultSection.appendChild(printContainer)
             }
           } catch (jsonError) {
             console.error("Error parsing JSON chunk:", jsonError, jsonStr)
