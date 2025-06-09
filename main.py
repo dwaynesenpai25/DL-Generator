@@ -10,6 +10,7 @@ import os
 import uuid
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
+from fastapi.staticfiles import StaticFiles
 from docx.shared import Inches, Pt
 from io import BytesIO
 from PyPDF2 import PdfMerger
@@ -36,6 +37,7 @@ import sqlite3
 
 # Initialize FastAPI app
 app = FastAPI(title="DL Generator API")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 origins = [
     "http://localhost:8000",
 ]
@@ -168,21 +170,27 @@ class AuditEntry(BaseModel):
     dl_type: Optional[str] = None
 
 SESSION_STORE = {}
-# Session state simulation
-SESSION_STATE = {
-    'selected_mode': '',
-    'selected_folder': '',
-    'selected_dl_type': '',
-    'selected_template': '',
-    'base_template': None,
-    'template_path': None,
-    'header_footer_template_path': None,
-    'transmittal_template_path': None,
-    'placeholders': [],
-    'download_completed': False,
-    'files_to_cleanup': [],
-    'zip_path': None
-}
+
+# Session state simulation - Use a function to get fresh state
+def get_fresh_session_state():
+    return {
+        'selected_mode': '',
+        'selected_folder': '',
+        'selected_dl_type': '',
+        'selected_template': '',
+        'base_template': None,
+        'template_path': None,
+        'header_footer_template_path': None,
+        'transmittal_template_path': None,
+        'placeholders': [],
+        'download_completed': False,
+        'files_to_cleanup': [],
+        'zip_path': None,
+        'template_combined': False
+    }
+
+# Initialize with fresh state
+SESSION_STATE = get_fresh_session_state()
 
 class FTPConnection:
     def __init__(self, hostname, port, username, password):
@@ -354,9 +362,53 @@ def add_audit_entry(client: str, processed_by: str, total_accounts: int, mode: s
 # Call at startup
 load_sessions()
 
+# Enhanced cleanup function
+def cleanup_files(file_paths):
+    """Enhanced cleanup function that handles all types of files"""
+    for file_path in file_paths:
+        try:
+            if file_path and Path(file_path).exists():
+                path_obj = Path(file_path)
+                if path_obj.is_file():
+                    path_obj.unlink()
+                    logger.info(f"Deleted file: {file_path}")
+                elif path_obj.is_dir():
+                    shutil.rmtree(path_obj)
+                    logger.info(f"Deleted directory: {file_path}")
+        except Exception as e:
+            logger.warning(f"Failed to delete {file_path}: {e}")
+
+def cleanup_output_directory():
+    """Clean up all files in the output directory"""
+    try:
+        if OUTPUT_DIR.exists():
+            for item in OUTPUT_DIR.iterdir():
+                try:
+                    if item.is_file():
+                        item.unlink()
+                        logger.info(f"Deleted output file: {item}")
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                        logger.info(f"Deleted output directory: {item}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete output item {item}: {e}")
+    except Exception as e:
+        logger.error(f"Error cleaning output directory: {e}")
+
+def reset_session_state():
+    """Reset the session state to fresh values"""
+    global SESSION_STATE
+    # Clean up any existing files first
+    cleanup_files(SESSION_STATE.get('files_to_cleanup', []))
+    cleanup_output_directory()
+    
+    # Reset to fresh state
+    SESSION_STATE = get_fresh_session_state()
+    logger.info("Session state has been reset")
+
 # Add new endpoint to get audit details
 @app.get("/api/audit_details/{audit_id}")
-async def get_audit_details(audit_id: int, user_info: dict = Depends(get_current_user)):
+async def get_audit_details(audit_id: int, page: int = 1, limit: int = 50, user_info: dict = Depends(get_current_user)):
     """Get detailed information about processed accounts for a specific audit entry"""
     user_email = user_info.get("email", "")
     user_clients, user_access = get_user_clients_and_access(user_email)
@@ -366,7 +418,7 @@ async def get_audit_details(audit_id: int, user_info: dict = Depends(get_current
         raise HTTPException(status_code=403, detail="Admin access required")
     
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # This enables column access by name
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # First, verify the audit entry exists and get its details
@@ -377,13 +429,19 @@ async def get_audit_details(audit_id: int, user_info: dict = Depends(get_current
         conn.close()
         raise HTTPException(status_code=404, detail="Audit entry not found")
     
-    # Get the actual processed accounts for this audit entry
+    # Get total count of accounts
+    cursor.execute("SELECT COUNT(*) as total FROM processed_accounts WHERE audit_id = ?", (audit_id,))
+    total_count = cursor.fetchone()["total"]
+    
+    # Get paginated accounts
+    offset = (page - 1) * limit
     cursor.execute("""
         SELECT dl_code, leads_chname, dl_address, final_area
         FROM processed_accounts
         WHERE audit_id = ?
         ORDER BY id
-    """, (audit_id,))
+        LIMIT ? OFFSET ?
+    """, (audit_id, limit, offset))
     
     accounts = []
     for row in cursor.fetchall():
@@ -396,9 +454,7 @@ async def get_audit_details(audit_id: int, user_info: dict = Depends(get_current
     
     conn.close()
     
-    # If no accounts found in the database, return empty list
-    if not accounts:
-        logger.warning(f"No processed accounts found for audit ID {audit_id}")
+    total_pages = (total_count + limit - 1) // limit
     
     return {
         "audit_id": audit_id,
@@ -407,7 +463,15 @@ async def get_audit_details(audit_id: int, user_info: dict = Depends(get_current
         "processed_at": audit_entry["processed_at"],
         "total_accounts": audit_entry["total_accounts"],
         "mode": audit_entry["mode"],
-        "accounts": accounts
+        "accounts": accounts,
+        "pagination": {
+            "current_page": page,
+            "total_pages": total_pages,
+            "total_count": total_count,
+            "limit": limit,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        }
     }
 
 @app.get("/api/check_session")
@@ -488,6 +552,10 @@ async def logout(request: Request, response: Response):
         del SESSION_STORE[session_id]
         save_sessions()  # Save after deleting
     response.delete_cookie("session_id")
+    
+    # Reset session state on logout
+    reset_session_state()
+    
     return {"success": True, "message": "Logged out successfully"}
 
 def get_ftp_folders(ftp):
@@ -543,8 +611,8 @@ def fetch_signature_from_ftp(ftp):
     # Try today and yesterday's date
     for days_ago in [0, 1]:
         date_str = (datetime.today() - timedelta(days=days_ago)).strftime('%m-%d-%Y')
-        ftp_path = f"field/DL/ATTY SIGNATURE/{date_str}"
-        # ftp_path = f"field/DL/ATTY SIGNATURE/05-29-2025"
+        # ftp_path = f"field/DL/ATTY SIGNATURE/{date_str}"
+        ftp_path = f"field/DL/ATTY SIGNATURE/05-29-2025"
         try:
             ftp.cwd(ftp_path)
             with NamedTemporaryFile(delete=False, suffix=".png") as tmp:
@@ -556,15 +624,6 @@ def fetch_signature_from_ftp(ftp):
             logger.warning(f"Failed to fetch signature for {date_str}: {e}")
     logger.error("Failed to fetch signature from FTP for today or yesterday.")
     return None
-
-def cleanup_files(file_paths):
-    for file_path in file_paths:
-        try:
-            if file_path and Path(file_path).exists():
-                Path(file_path).unlink()
-                logger.info(f"Deleted file: {file_path}")
-        except Exception as e:
-            logger.warning(f"Failed to delete file {file_path}: {e}")
 
 def get_sheet_data(service_account_json_path, spreadsheet_id, sheet_name="LetterHeads"):
     try:
@@ -602,19 +661,28 @@ def combine_templates(header_footer_path, content_path, signature_img_path, word
     try:
         header_footer_doc = Document(header_footer_path)
         content_doc = Document(content_path)
-        while header_footer_doc.paragraphs:
-            header_footer_doc.paragraphs[0]._element.getparent().remove(header_footer_doc.paragraphs[0]._element)
+        # while header_footer_doc.paragraphs:
+        #     header_footer_doc.paragraphs[0]._element.getparent().remove(header_footer_doc.paragraphs[0]._element)
         for elem in content_doc.element.body:
             header_footer_doc.element.body.append(elem)
-        for para in header_footer_doc.paragraphs:
-            para.paragraph_format.space_before = Pt(0)
-            para.paragraph_format.space_after = Pt(0)
+        # for para in header_footer_doc.paragraphs:
+        #     para.paragraph_format.space_before = Pt(0)
+        #     para.paragraph_format.space_after = Pt(0)
+         # ✅ Set top margin to 1.04 inches
+        for section in header_footer_doc.sections:
+            section.header_distance = Inches(0.2)
+            section.footer_distance = Inches(0.2)
+
         if signature_img_path and Path(signature_img_path).exists():
             with TemporaryDirectory() as temp_dir:
                 temp_doc_path = Path(temp_dir) / "temp_combined_doc.docx"
                 header_footer_doc.save(temp_doc_path)
                 temp_doc_path = replace_in_text_boxes(header_footer_doc, "«IMAGE_SIGNATURE»", signature_img_path, word_app, temp_doc_path)
                 header_footer_doc = Document(temp_doc_path)
+        
+        # Set flag that template has been combined
+        SESSION_STATE['template_combined'] = True
+        
         return header_footer_doc
     except Exception as e:
         logger.error(f"Failed to combine templates or replace signature: {e}")
@@ -947,7 +1015,7 @@ def convert_batch_with_retry(batch_files, output_dir, batch_id, timeout=180):
             return [], batch_files
     return [], batch_files
 
-def batch_convert_libreoffice(docx_files, output_dir, batch_size=100):
+def batch_convert_libreoffice(docx_files, output_dir, batch_size=350):
     if not docx_files:
         return []
     pdf_files = []
@@ -1098,16 +1166,24 @@ async def update_user(email: str, user: UserCreate, user_info: dict = Depends(ge
         
 # Audit Trail API Endpoints
 @app.get("/api/audit_trail")
-async def get_audit_trail(user_info: dict = Depends(get_current_user)):
+async def get_audit_trail(page: int = 1, limit: int = 10, user_info: dict = Depends(get_current_user)):
+    offset = (page - 1) * limit
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # This enables column access by name
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    
+    # Get total count
+    cursor.execute('SELECT COUNT(*) as total FROM audit_trail')
+    total_count = cursor.fetchone()["total"]
+    
+    # Get paginated results
     cursor.execute('''
         SELECT id, client, processed_by, processed_at, total_accounts, mode 
         FROM audit_trail 
         ORDER BY processed_at DESC 
-        LIMIT 100
-    ''')
+        LIMIT ? OFFSET ?
+    ''', (limit, offset))
+    
     audit_entries = []
     for row in cursor.fetchall():
         audit_entries.append({
@@ -1119,7 +1195,20 @@ async def get_audit_trail(user_info: dict = Depends(get_current_user)):
             "mode": row["mode"]
         })
     conn.close()
-    return audit_entries
+    
+    total_pages = (total_count + limit - 1) // limit
+    
+    return {
+        "entries": audit_entries,
+        "pagination": {
+            "current_page": page,
+            "total_pages": total_pages,
+            "total_count": total_count,
+            "limit": limit,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        }
+    }
 
 @app.get("/api/folders")
 async def get_folders(user_info: dict = Depends(get_current_user)):
@@ -1260,7 +1349,17 @@ async def get_placeholders(request: TemplateRequest, user_info: dict = Depends(g
             SESSION_STATE['base_template'] = base_template
             placeholders = extract_placeholders(base_template)
             SESSION_STATE['placeholders'] = placeholders
-            return {"message": "Final template retrieved successfully", "placeholders": placeholders}
+            
+            # Check if template is already combined
+            template_combined_message = ""
+            if SESSION_STATE.get('template_combined', False):
+                template_combined_message = " (Template already)"
+            
+            return {
+                "message": f"Final template retrieved successfully{template_combined_message}", 
+                "placeholders": placeholders,
+                "template_combined": SESSION_STATE.get('template_combined', False)
+            }
         finally:
             word_app.Quit()
             pythoncom.CoUninitialize()
@@ -1281,6 +1380,11 @@ async def upload_excel(file: UploadFile = File(...)):
 async def set_mode(request: ModeRequest):
     if request.mode not in ["DL Only", "DL w/ Transmittal", "Transmittal Only"]:
         raise HTTPException(status_code=400, detail="Invalid mode")
+    
+    # Reset session state before setting new mode to prevent conflicts
+    if SESSION_STATE.get('selected_mode') and SESSION_STATE.get('selected_mode') != request.mode:
+        logger.info(f"Mode changing from {SESSION_STATE.get('selected_mode')} to {request.mode}, resetting state")
+        reset_session_state()
     
     SESSION_STATE['selected_mode'] = request.mode
     template_status = {}
@@ -1469,84 +1573,68 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                 logger.debug(f"Converting {len(docx_files)} DOCX files for {final_area}")
                                 yield json.dumps({
                                     'progress': (processed_records / total_records) * 100,
-                                    'message': f"Converting {len(docx_files)} {selected_mode} docx to PDF for {final_area}"
+                                    'message': f"Converting {len(docx_files)} documents to PDF for {final_area}..."
                                 }) + '\n'
                                 await asyncio.sleep(0)
-                                pdf_files = batch_convert_libreoffice(docx_files, area_dir)
-                                yield json.dumps({
-                                    'progress': (processed_records / total_records) * 100,
-                                    'message': f"Converted {len(pdf_files)}/{len(docx_files)} {selected_mode} PDFs for {final_area}"
-                                }) + '\n'
-                                await asyncio.sleep(0)
-                                for pdf_file in pdf_files:
-                                    pdf_name = Path(pdf_file).name
-                                    if "transmittal_" in pdf_name and SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"]:
-                                        transmittal_pdf_merger.append(pdf_file)
-                                        temp_files.append(pdf_file)
-                                    elif "dl_" in pdf_name and SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"]:
-                                        dl_pdf_merger.append(pdf_file)
-                                        temp_files.append(pdf_file)
-                            if SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"] and dl_pdf_merger:
-                                dl_merged_pdf_path = area_dir / f"{final_area}_dl_{record_count}.pdf"
-                                with open(dl_merged_pdf_path, "wb") as f:
-                                    dl_pdf_merger.write(f)
-                                if dl_merged_pdf_path.exists():
-                                    zipf.write(dl_merged_pdf_path, f"{final_area}/{final_area}_dl_{record_count}.pdf")
-                                    temp_files.append(str(dl_merged_pdf_path))
-                            if SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"] and transmittal_pdf_merger:
-                                transmittal_merged_pdf_path = area_dir / f"{final_area}_transmittal_{record_count}.pdf"
-                                with open(transmittal_merged_pdf_path, "wb") as f:
-                                    transmittal_pdf_merger.write(f)
-                                if transmittal_merged_pdf_path.exists():
-                                    zipf.write(transmittal_merged_pdf_path, f"{final_area}/{final_area}_transmittal_{record_count}.pdf")
-                                    temp_files.append(str(transmittal_merged_pdf_path))
-                        except Exception as e:
-                            logger.error(f"Error processing FINAL_AREA {final_area}: {e}")
-                            yield json.dumps({'error': f"Failed to process {final_area}: {str(e)}"}) + '\n'
-                            return
+                                pdf_files = batch_convert_libreoffice(docx_files, area_dir, batch_size=300)
+                                if pdf_files:
+                                    for pdf_file in pdf_files:
+                                        if "transmittal" in Path(pdf_file).name and transmittal_pdf_merger:
+                                            transmittal_pdf_merger.append(pdf_file)
+                                        elif "dl" in Path(pdf_file).name and dl_pdf_merger:
+                                            dl_pdf_merger.append(pdf_file)
+                                    if dl_pdf_merger and SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"]:
+                                        dl_merged_path = area_dir / f"{final_area}_DL.pdf"
+                                        with open(dl_merged_path, 'wb') as output_file:
+                                            dl_pdf_merger.write(output_file)
+                                        zipf.write(dl_merged_path, f"{final_area}_DL.pdf")
+                                        logger.info(f"Created DL PDF for {final_area}: {dl_merged_path}")
+                                    if transmittal_pdf_merger and SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"]:
+                                        transmittal_merged_path = area_dir / f"{final_area}_Transmittal.pdf"
+                                        with open(transmittal_merged_path, 'wb') as output_file:
+                                            transmittal_pdf_merger.write(output_file)
+                                        zipf.write(transmittal_merged_path, f"{final_area}_Transmittal.pdf")
+                                        logger.info(f"Created Transmittal PDF for {final_area}: {transmittal_merged_path}")
+                                else:
+                                    logger.warning(f"No PDFs generated for {final_area}")
+                                cleanup_files(temp_files)
                         finally:
                             if dl_pdf_merger:
                                 dl_pdf_merger.close()
                             if transmittal_pdf_merger:
                                 transmittal_pdf_merger.close()
-                            cleanup_files(temp_files)
                     
-                    # Insert any remaining accounts in the batch
+                    # Process any remaining accounts in the batch
                     if account_batch:
                         cursor.executemany(
                             "INSERT INTO processed_accounts (audit_id, dl_code, leads_chname, dl_address, final_area) VALUES (?, ?, ?, ?, ?)",
                             account_batch
                         )
                         conn.commit()
+                    
+                    conn.close()
+                    
+                    zipf.close()
+                    zipf = None
+                    final_zip_path = OUTPUT_DIR / "final_area_pdfs.zip"
+                    shutil.move(str(zip_path), str(final_zip_path))
+                    SESSION_STATE['zip_path'] = str(final_zip_path)
+                    SESSION_STATE['files_to_cleanup'].append(str(final_zip_path))
+                    total_time = time.time() - start_time
+                    yield json.dumps({
+                        'progress': 100,
+                        'message': f"Processing complete! Generated PDFs for {len(valid_rows.groupby('FINAL_AREA'))} FINAL_AREA groups in {total_time:.1f}s",
+                        'download_ready': True
+                    }) + '\n'
+            except Exception as e:
+                logger.error(f"Error during PDF generation: {e}")
+                yield json.dumps({'error': f'PDF generation failed: {str(e)}'}) + '\n'
             finally:
                 if zipf:
                     zipf.close()
-                    logger.debug(f"Closed ZipFile: {zip_path}")
-                conn.close()
-
-            if zip_path.exists() and zip_path.stat().st_size > 0:
-                persistent_zip_path = OUTPUT_DIR / "final_area_pdfs.zip"
-                shutil.move(str(zip_path), str(persistent_zip_path))
-                SESSION_STATE['download_completed'] = True
-                SESSION_STATE['zip_path'] = str(persistent_zip_path)
-                total_time = time.time() - start_time
-                
-                logger.info(f"Completed processing in {total_time:.1f}s")
-                yield json.dumps({
-                    'progress': 100,
-                    'message': f"Completed {total_records} records in {total_time:.1f}s!",
-                    'download_ready': True
-                }) + '\n'
-            else:
-                logger.error("No valid PDFs generated")
-                yield json.dumps({'error': 'No valid PDFs generated'}) + '\n'
     except Exception as e:
-        logger.error(f"Processing failed in generate: {str(e)}")
-        yield json.dumps({'error': f"Processing failed: {str(e)}"}) + '\n'
-    finally:
-        if zipf and not zipf.fp is None:
-            zipf.close()
-            logger.debug("Ensured ZipFile is closed in finally block")
+        logger.error(f"Error in generate_pdfs_stream: {e}")
+        yield json.dumps({'error': f'Processing failed: {str(e)}'}) + '\n'
 
 @app.post("/api/generate_pdfs")
 async def generate_pdfs(file: UploadFile = File(...), user_info: dict = Depends(get_current_user)):
@@ -1555,40 +1643,28 @@ async def generate_pdfs(file: UploadFile = File(...), user_info: dict = Depends(
     df = get_raw_file(file)
     if df.empty:
         raise HTTPException(status_code=500, detail="Failed to read Excel file")
-    if 'FINAL_AREA' not in df.columns or 'DL_CODE' not in df.columns:
-        raise HTTPException(status_code=400, detail="Excel file must contain FINAL_AREA and DL_CODE columns")
-    return StreamingResponse(generate_pdfs_stream(file, df, user_info), media_type="text/event-stream")
+    return StreamingResponse(
+        generate_pdfs_stream(file, df, user_info),
+        media_type="application/json"
+    )
 
 @app.get("/api/download_zip")
 async def download_zip():
-    if not SESSION_STATE.get('download_completed') or not SESSION_STATE.get('zip_path'):
-        raise HTTPException(status_code=404, detail="No ZIP file available")
-    if not Path(SESSION_STATE['zip_path']).exists():
-        raise HTTPException(status_code=404, detail="ZIP file not found on server")
-    return FileResponse(
-        SESSION_STATE['zip_path'],
-        filename="final_area_pdfs.zip",
-        media_type="application/zip"
-    )
+    zip_path = SESSION_STATE.get('zip_path')
+    if not zip_path or not Path(zip_path).exists():
+        raise HTTPException(status_code=404, detail="ZIP file not found")
+    return FileResponse(zip_path, filename="final_area_pdfs.zip", media_type="application/zip")
 
 @app.post("/api/cleanup")
 async def cleanup():
-    cleanup_files(SESSION_STATE.get('files_to_cleanup', []))
-    if SESSION_STATE.get('zip_path') and Path(SESSION_STATE['zip_path']).exists():
-        Path(SESSION_STATE['zip_path']).unlink()
-        logger.info(f"Deleted ZIP file: {SESSION_STATE['zip_path']}")
-    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    SESSION_STATE['download_completed'] = False
-    SESSION_STATE['files_to_cleanup'] = []
-    SESSION_STATE['base_template'] = None
-    SESSION_STATE['template_path'] = None
-    SESSION_STATE['header_footer_template_path'] = None
-    SESSION_STATE['transmittal_template_path'] = None
-    SESSION_STATE['placeholders'] = []
-    SESSION_STATE['zip_path'] = None
-    return {"success": True, "message": "Files cleaned up successfully"}
+    try:
+        # Enhanced cleanup that resets everything
+        reset_session_state()
+        return {"success": True, "message": "Files cleaned up and session reset successfully"}
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        return {"success": False, "detail": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=5000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=5000)

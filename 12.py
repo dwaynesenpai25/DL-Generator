@@ -1,5 +1,5 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Response, Request
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
@@ -17,7 +17,7 @@ from barcode import Code128
 from barcode.writer import ImageWriter
 import shutil
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
@@ -31,11 +31,18 @@ import qrcode
 import json
 import asyncio
 import subprocess
+import requests
+import sqlite3
+
 # Initialize FastAPI app
 app = FastAPI(title="DL Generator API")
+origins = [
+    "http://localhost:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,16 +62,76 @@ BARCODE_DIR = Path("barcode_images").absolute()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(BARCODE_DIR, exist_ok=True)
 
+# Database setup
+DB_PATH = "dl_generator.db"
+
+def init_database():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Create users table with multiple clients support
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            clients TEXT NOT NULL,
+            access TEXT NOT NULL DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create audit_trail table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audit_trail (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client TEXT NOT NULL,
+            processed_by TEXT NOT NULL,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_accounts INTEGER NOT NULL,
+            mode TEXT NOT NULL,
+            template_folder TEXT,
+            dl_type TEXT
+        )
+    ''')
+    
+    # Create processed_accounts table to store actual account data
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS processed_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            audit_id INTEGER NOT NULL,
+            dl_code TEXT,
+            leads_chname TEXT,
+            dl_address TEXT,
+            final_area TEXT,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (audit_id) REFERENCES audit_trail (id) ON DELETE CASCADE
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Initialize database
+init_database()
+
 FTP_CONFIG = {
     "hostname": os.getenv("OMKT_FTP_HOSTNAME"),
     "port": int(os.getenv("OMKT_FTP_PORT", 21)),
     "username": os.getenv("OMKT_FTP_USERNAME"),
     "password": os.getenv("OMKT_FTP_PASSWORD")
 }
-
+APP_ID = os.getenv("APP_ID")
+APP_SECRET = os.getenv("APP_SECRET")
+REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8000/api/lark_callback")
+AUTH_URL = f"https://open.larksuite.com/open-apis/authen/v1/authorize?app_id={APP_ID}&redirect_uri={REDIRECT_URI}"
+TOKEN_URL = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal"
+USER_ACCESS_TOKEN_URL = "https://open.larksuite.com/open-apis/authen/v1/oidc/access_token"
+USER_INFO_URL = "https://open.larksuite.com/open-apis/authen/v1/user_info"
+REFRESH_TOKEN_URL = "https://open.larksuite.com/open-apis/authen/v1/oidc/refresh_access_token"
 SERVICE_ACCOUNT_JSON = "config/dl_automation_sheet.json"
 SPREADSHEET_ID = "1M0Vmmf9HfPRB0oSeJR_xUAZPPpTJ4xsR3gYDQMvnu5k"
 SHEET_NAME = "LetterHeads"
+SESSION_FILE = Path("sessions.json")
 
 # Pydantic Models
 class LoginRequest(BaseModel):
@@ -72,8 +139,14 @@ class LoginRequest(BaseModel):
     password: str
 
 class User(BaseModel):
-    username: str
-    role: str
+    email: str
+    clients: List[str]
+    access: str
+
+class UserCreate(BaseModel):
+    email: str
+    clients: List[str]
+    access: str
 
 class FolderRequest(BaseModel):
     folder: str
@@ -86,12 +159,15 @@ class TemplateRequest(BaseModel):
 class ModeRequest(BaseModel):
     mode: str
 
-# Mock user database
-USERS = {
-    'admin': {'password': 'admin123', 'role': 'Admin'},
-    'user': {'password': 'user123', 'role': 'User'}
-}
+class AuditEntry(BaseModel):
+    client: str
+    processed_by: str
+    total_accounts: int
+    mode: str
+    template_folder: Optional[str] = None
+    dl_type: Optional[str] = None
 
+SESSION_STORE = {}
 # Session state simulation
 SESSION_STATE = {
     'selected_mode': '',
@@ -143,6 +219,277 @@ class FTPConnection:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+def get_app_access_token():
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    data = {"app_id": APP_ID, "app_secret": APP_SECRET}
+    try:
+        response = requests.post(TOKEN_URL, json=data, headers=headers)
+        response.raise_for_status()
+        return response.json().get("tenant_access_token")
+    except Exception as e:
+        logger.error(f"Failed to get app access token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get app access token")
+
+def get_user_access_token(auth_code: str, tenant_access_token: str):
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {tenant_access_token}"
+    }
+    data = {"grant_type": "authorization_code", "code": auth_code}
+    try:
+        response = requests.post(USER_ACCESS_TOKEN_URL, json=data, headers=headers)
+        response_data = response.json()
+        if "data" not in response_data or "access_token" not in response_data["data"]:
+            logger.error(f"Failed to get user access token: {response_data}")
+            raise HTTPException(status_code=401, detail="Failed to get user access token")
+        expires_in = response_data["data"]["expires_in"]
+        expires_at = datetime.now() + timedelta(seconds=expires_in)
+        return (
+            response_data["data"]["access_token"],
+            response_data["data"]["refresh_token"],
+            expires_at
+        )
+    except Exception as e:
+        logger.error(f"Error getting user access token: {e}")
+        raise HTTPException(status_code=500, detail="Error getting user access token")
+
+def refresh_user_access_token(refresh_token: str, tenant_access_token: str):
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {tenant_access_token}"
+    }
+    data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    try:
+        response = requests.post(REFRESH_TOKEN_URL, json=data, headers=headers)
+        response_data = response.json()
+        if response_data.get("code") != 0:
+            logger.error(f"Failed to refresh access token: {response_data.get('message', 'Unknown error')}")
+            raise HTTPException(status_code=401, detail="Failed to refresh access token")
+        expires_in = response_data["data"]["expires_in"]
+        expires_at = datetime.now() + timedelta(seconds=expires_in)
+        return (
+            response_data["data"]["access_token"],
+            response_data["data"]["refresh_token"],
+            expires_at
+        )
+    except Exception as e:
+        logger.error(f"Error refreshing access token: {e}")
+        raise HTTPException(status_code=500, detail="Error refreshing access token")
+
+def get_user_info(user_access_token: str):
+    headers = {"Authorization": f"Bearer {user_access_token}"}
+    try:
+        response = requests.get(USER_INFO_URL, headers=headers)
+        response.raise_for_status()
+        response_data = response.json()
+        if "data" not in response_data:
+            logger.error(f"Failed to get user information: {response_data}")
+            raise HTTPException(status_code=401, detail="Failed to get user information")
+        return response_data["data"]
+    except Exception as e:
+        logger.error(f"Error getting user info: {e}")
+        raise HTTPException(status_code=500, detail="Error getting user info")
+
+def get_user_clients_and_access(email: str):
+    """Get user's assigned clients and access level from database"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT clients, access FROM users WHERE email = ?", (email,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        clients_str, access = result
+        clients = clients_str.split(',') if clients_str else []
+        return clients, access
+    return [], None
+
+# Dependency to get current user
+async def get_current_user(request: Request):
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSION_STORE:
+        raise HTTPException(status_code=401, detail="Invalid or missing session")
+    session = SESSION_STORE[session_id]
+    expires_at = datetime.fromisoformat(session["expires_at"])
+    if datetime.now() > expires_at:
+        tenant_access_token = get_app_access_token()
+        user_access_token, refresh_token, expires_at = refresh_user_access_token(session["refresh_token"], tenant_access_token)
+        if not user_access_token:
+            raise HTTPException(status_code=401, detail="Session expired")
+        SESSION_STORE[session_id]["user_access_token"] = user_access_token
+        SESSION_STORE[session_id]["refresh_token"] = refresh_token
+        SESSION_STORE[session_id]["expires_at"] = expires_at.isoformat()
+        save_sessions()
+        session["user_access_token"] = user_access_token
+        session["expires_at"] = expires_at
+    return session["user_info"]
+
+def load_sessions():
+    global SESSION_STORE
+    if SESSION_FILE.exists():
+        try:
+            with SESSION_FILE.open("r") as f:
+                SESSION_STORE = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load sessions: {e}")
+
+# Save sessions
+def save_sessions():
+    try:
+        with SESSION_FILE.open("w") as f:
+            json.dump(SESSION_STORE, f)
+    except Exception as e:
+        logger.error(f"Failed to save sessions: {e}")
+
+def add_audit_entry(client: str, processed_by: str, total_accounts: int, mode: str, template_folder: str = None, dl_type: str = None):
+    """Add entry to audit trail"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO audit_trail (client, processed_by, total_accounts, mode, template_folder, dl_type)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (client, processed_by, total_accounts, mode, template_folder, dl_type))
+    conn.commit()
+    conn.close()
+
+# Call at startup
+load_sessions()
+
+# Add new endpoint to get audit details
+@app.get("/api/audit_details/{audit_id}")
+async def get_audit_details(audit_id: int, user_info: dict = Depends(get_current_user)):
+    """Get detailed information about processed accounts for a specific audit entry"""
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    # Only admin can access audit details
+    if user_access != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # This enables column access by name
+    cursor = conn.cursor()
+    
+    # First, verify the audit entry exists and get its details
+    cursor.execute("SELECT id, client, processed_by, processed_at, total_accounts, mode FROM audit_trail WHERE id = ?", (audit_id,))
+    audit_entry = cursor.fetchone()
+    
+    if not audit_entry:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Audit entry not found")
+    
+    # Get the actual processed accounts for this audit entry
+    cursor.execute("""
+        SELECT dl_code, leads_chname, dl_address, final_area
+        FROM processed_accounts
+        WHERE audit_id = ?
+        ORDER BY id
+    """, (audit_id,))
+    
+    accounts = []
+    for row in cursor.fetchall():
+        accounts.append({
+            "dl_code": row["dl_code"],
+            "name": row["leads_chname"],
+            "address": row["dl_address"],
+            "area": row["final_area"]
+        })
+    
+    conn.close()
+    
+    # If no accounts found in the database, return empty list
+    if not accounts:
+        logger.warning(f"No processed accounts found for audit ID {audit_id}")
+    
+    return {
+        "audit_id": audit_id,
+        "client": audit_entry["client"],
+        "processed_by": audit_entry["processed_by"],
+        "processed_at": audit_entry["processed_at"],
+        "total_accounts": audit_entry["total_accounts"],
+        "mode": audit_entry["mode"],
+        "accounts": accounts
+    }
+
+@app.get("/api/check_session")
+async def check_session(user_info: dict = Depends(get_current_user)):
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    # Determine access level
+    if user_access == "admin":
+        access_level = "admin"
+    elif user_access == "user":
+        access_level = "user"
+    else:
+        # Default logic for users not in database
+        access_level = "admin" if user_email.endswith("@spmadridlaw.com") else "user"
+    
+    return {
+        "success": True,
+        "username": user_info.get("name", user_info.get("email", "Unknown")),
+        "role": access_level.title(),
+        "access": access_level,
+        "clients": user_clients,
+        "avatar": user_info
+    }
+    
+# API Endpoints
+@app.get("/api/login")
+async def login():
+    return RedirectResponse(url=AUTH_URL)
+
+@app.get("/api/lark_callback")
+async def lark_callback(code: str, response: Response):
+    try:
+        tenant_access_token = get_app_access_token()
+        user_access_token, refresh_token, expires_at = get_user_access_token(code, tenant_access_token)
+        user_info = get_user_info(user_access_token)
+        if not user_info:
+            raise HTTPException(status_code=401, detail="Failed to retrieve user info")
+        
+        # Generate session ID
+        session_id = str(uuid.uuid4())
+        SESSION_STORE[session_id] = {
+            "user_access_token": user_access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at.isoformat(),
+            "user_info": user_info
+        }
+        save_sessions()
+        
+        # Get user access level from database
+        user_email = user_info.get("email", "")
+        user_clients, user_access = get_user_clients_and_access(user_email)
+        
+        if user_access == "admin":
+            role = "Admin"
+        elif user_access == "user":
+            role = "User"
+        else:
+            # Default logic for users not in database
+            role = "Admin" if user_email.endswith("@spmadridlaw.com") else "User"
+        
+        # Set session cookie
+        response.set_cookie(key="session_id", value=session_id, httponly=True, secure=True, samesite="lax")
+        
+        return {
+            "success": True,
+            "role": role,
+            "username": user_info.get("name", user_info.get("email", "Unknown"))
+        }
+    except Exception as e:
+        logger.error(f"Error in Lark callback: {e}")
+        raise HTTPException(status_code=500, detail="Authentication failed")
+
+@app.get("/api/logout")
+async def logout(request: Request, response: Response):
+    session_id = request.cookies.get("session_id")
+    if session_id in SESSION_STORE:
+        del SESSION_STORE[session_id]
+        save_sessions()  # Save after deleting
+    response.delete_cookie("session_id")
+    return {"success": True, "message": "Logged out successfully"}
+
 def get_ftp_folders(ftp):
     try:
         ftp_path = "/DL AUTOMATION/Template DL V2/Content"
@@ -193,18 +540,22 @@ def download_ftp_template(ftp, folder_name, template_name, is_header_footer=Fals
         return None
 
 def fetch_signature_from_ftp(ftp):
-    try:
-        ftp_path = f"field/DL/ATTY SIGNATURE/05-29-2025"
-        ftp.cwd(ftp_path)
-        with NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            ftp.retrbinary("RETR attySignature.PNG", tmp.write)
-            tmp_path = tmp.name
-        if os.path.exists(tmp_path):
-            return tmp_path
-        return None
-    except Exception as e:
-        logger.error(f"Failed to fetch signature from FTP: {e}")
-        return None
+    # Try today and yesterday's date
+    for days_ago in [0, 1]:
+        date_str = (datetime.today() - timedelta(days=days_ago)).strftime('%m-%d-%Y')
+        ftp_path = f"field/DL/ATTY SIGNATURE/{date_str}"
+        # ftp_path = f"field/DL/ATTY SIGNATURE/05-29-2025"
+        try:
+            ftp.cwd(ftp_path)
+            with NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                ftp.retrbinary("RETR attySignature.PNG", tmp.write)
+                tmp_path = tmp.name
+            if os.path.exists(tmp_path):
+                return tmp_path
+        except Exception as e:
+            logger.warning(f"Failed to fetch signature for {date_str}: {e}")
+    logger.error("Failed to fetch signature from FTP for today or yesterday.")
+    return None
 
 def cleanup_files(file_paths):
     for file_path in file_paths:
@@ -217,13 +568,19 @@ def cleanup_files(file_paths):
 
 def get_sheet_data(service_account_json_path, spreadsheet_id, sheet_name="LetterHeads"):
     try:
+        # Updated scopes to match exactly what gspread expects
+        scopes = [
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        
         credentials = Credentials.from_service_account_file(
             service_account_json_path,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
+            scopes=scopes
         )
+        
         client = gspread.authorize(credentials)
         spreadsheet = client.open_by_key(spreadsheet_id)
         worksheet = spreadsheet.worksheet(sheet_name)
@@ -381,7 +738,7 @@ def extract_placeholders(doc):
                     if node.tag.endswith("}t") and node.text and "«" in node.text:
                         matches = re.findall(r"«(.*?)»", node.text)
                         placeholders.update(["«" + m.strip() + "»" for m in matches])
-        for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+        for footer in [section.footer, section.first_page_footer, section.even_page_header]:
             if footer is not None:
                 for para in footer.paragraphs:
                     if "«" in para.text:
@@ -467,19 +824,12 @@ def fill_template(doc, mapping, barcode_buffer=None):
                                     for run in para.runs:
                                         if run.text:
                                             run.text = replace_in_text(run.text)
-        for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+        for footer in [section.footer, section.first_page_footer, section.even_page_header]:
             if footer:
                 for para in footer.paragraphs:
                     for run in para.runs:
                         if run.text:
                             run.text = replace_in_text(run.text)
-                for table in footer.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            for para in cell.paragraphs:
-                                for run in para.runs:
-                                    if run.text:
-                                        run.text = replace_in_text(run.text)
     return doc
 
 def clear_placeholders(inner_table):
@@ -597,7 +947,7 @@ def convert_batch_with_retry(batch_files, output_dir, batch_id, timeout=180):
             return [], batch_files
     return [], batch_files
 
-def batch_convert_libreoffice(docx_files, output_dir, batch_size=100):
+def batch_convert_libreoffice(docx_files, output_dir, batch_size=350):
     if not docx_files:
         return []
     pdf_files = []
@@ -664,28 +1014,173 @@ def fill_transmittal_template(template_path, group_df):
         logger.error(f"Failed to fill transmittal template: {e}")
         return None
 
-# API Endpoints
-@app.post("/api/login")
-async def login(request: LoginRequest):
-    if request.username in USERS and USERS[request.username]['password'] == request.password:
-        return {"success": True, "role": USERS[request.username]['role'], "username": request.username}
-    raise HTTPException(status_code=401, detail="Invalid credentials")
+# User Management API Endpoints
+@app.get("/api/users")
+async def get_users(user_info: dict = Depends(get_current_user)):
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT email, clients, access FROM users ORDER BY email")
+    users = []
+    for row in cursor.fetchall():
+        email, clients_str, access = row
+        clients = clients_str.split(',') if clients_str else []
+        users.append({"email": email, "clients": clients, "access": access})
+    conn.close()
+    return users
+
+@app.post("/api/users")
+async def create_user(user: UserCreate, user_info: dict = Depends(get_current_user)):
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        clients_str = ','.join(user.clients)
+        cursor.execute("INSERT INTO users (email, clients, access) VALUES (?, ?, ?)", 
+                      (user.email, clients_str, user.access))
+        conn.commit()
+        return {"success": True, "message": "User created successfully"}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="User with this email already exists")
+    finally:
+        conn.close()
+
+@app.delete("/api/users/{email}")
+async def delete_user(email: str, user_info: dict = Depends(get_current_user)):
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users WHERE email = ?", (email,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "User deleted successfully"}
+
+@app.put("/api/users/{email}")
+async def update_user(email: str, user: UserCreate, user_info: dict = Depends(get_current_user)):
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        clients_str = ','.join(user.clients)
+        cursor.execute("UPDATE users SET email = ?, clients = ?, access = ? WHERE email = ?", 
+                      (user.email, clients_str, user.access, email))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        conn.commit()
+        return {"success": True, "message": "User updated successfully"}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="User with this email already exists")
+    finally:
+        conn.close()
+        
+# Audit Trail API Endpoints
+@app.get("/api/audit_trail")
+async def get_audit_trail(user_info: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # This enables column access by name
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, client, processed_by, processed_at, total_accounts, mode 
+        FROM audit_trail 
+        ORDER BY processed_at DESC 
+        LIMIT 100
+    ''')
+    audit_entries = []
+    for row in cursor.fetchall():
+        audit_entries.append({
+            "id": row["id"],
+            "client": row["client"],
+            "processed_by": row["processed_by"],
+            "processed_at": row["processed_at"],
+            "total_accounts": row["total_accounts"],
+            "mode": row["mode"]
+        })
+    conn.close()
+    return audit_entries
 
 @app.get("/api/folders")
-async def get_folders():
+async def get_folders(user_info: dict = Depends(get_current_user)):
     if not all([FTP_CONFIG["hostname"], FTP_CONFIG["username"], FTP_CONFIG["password"]]):
         raise HTTPException(status_code=500, detail="FTP configuration incomplete")
+    
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
     with FTPConnection(FTP_CONFIG["hostname"], FTP_CONFIG["port"], FTP_CONFIG["username"], FTP_CONFIG["password"]) as ftp_conn:
         ftp = ftp_conn.connect()
         if not ftp:
             raise HTTPException(status_code=500, detail="Failed to connect to FTP")
-        folders = get_ftp_folders(ftp)
-        return folders
+        
+        all_folders = get_ftp_folders(ftp)
+        
+        # If user is admin, return all folders
+        if user_access == "admin":
+            return all_folders
+        
+        # If user has assigned clients, return only those folders
+        if user_clients:
+            available_folders = [folder for folder in all_folders if folder in user_clients]
+            return available_folders
+        
+        # If user has no assigned clients, return empty
+        return []
+
+@app.get("/api/all_folders")
+async def get_all_folders(user_info: dict = Depends(get_current_user)):
+    """Get all available folders for admin users (used in user management modal)"""
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    if not all([FTP_CONFIG["hostname"], FTP_CONFIG["username"], FTP_CONFIG["password"]]):
+        raise HTTPException(status_code=500, detail="FTP configuration incomplete")
+    
+    with FTPConnection(FTP_CONFIG["hostname"], FTP_CONFIG["port"], FTP_CONFIG["username"], FTP_CONFIG["password"]) as ftp_conn:
+        ftp = ftp_conn.connect()
+        if not ftp:
+            raise HTTPException(status_code=500, detail="Failed to connect to FTP")
+        
+        all_folders = get_ftp_folders(ftp)
+        return all_folders
 
 @app.post("/api/dl_types")
-async def get_dl_types(request: FolderRequest):
+async def get_dl_types(request: FolderRequest, user_info: dict = Depends(get_current_user)):
     if not request.folder:
         raise HTTPException(status_code=400, detail="Folder not specified")
+    
+    # Check if user has access to this folder
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":  # Not admin
+        if not user_clients or request.folder not in user_clients:
+            raise HTTPException(status_code=403, detail="Access denied to this template folder")
+    
     sheet_df = get_sheet_data(SERVICE_ACCOUNT_JSON, SPREADSHEET_ID, SHEET_NAME)
     if sheet_df.empty:
         raise HTTPException(status_code=500, detail="Failed to retrieve Google Sheets data")
@@ -693,27 +1188,49 @@ async def get_dl_types(request: FolderRequest):
     return dl_types
 
 @app.post("/api/templates")
-async def get_templates(request: FolderRequest):
+async def get_templates(request: FolderRequest, user_info: dict = Depends(get_current_user)):
     if not request.folder:
         raise HTTPException(status_code=400, detail="Folder not specified")
+    
+    # Check if user has access to this folder
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":  # Not admin
+        if not user_clients or request.folder not in user_clients:
+            raise HTTPException(status_code=403, detail="Access denied to this template folder")
+    
     with FTPConnection(FTP_CONFIG["hostname"], FTP_CONFIG["port"], FTP_CONFIG["username"], FTP_CONFIG["password"]) as ftp_conn:
         ftp = ftp_conn.connect()
         if not ftp:
             raise HTTPException(status_code=500, detail="Failed to connect to FTP")
         templates = get_ftp_templates(ftp, request.folder)
-        return templates
+        return {"message": "Content/Letter Head retrieved successfully", "templates": templates}
 
 @app.post("/api/placeholders")
-async def get_placeholders(request: TemplateRequest):
+async def get_placeholders(request: TemplateRequest, user_info: dict = Depends(get_current_user)):
     if not all([request.folder, request.dl_type, request.template]):
         raise HTTPException(status_code=400, detail="Missing parameters")
+    
+    # Check if user has access to this folder
+    user_email = user_info.get("email", "")
+    user_clients, user_access = get_user_clients_and_access(user_email)
+    
+    if user_access != "admin":  # Not admin
+        if not user_clients or request.folder not in user_clients:
+            raise HTTPException(status_code=403, detail="Access denied to this template folder")
+    
+    # Store selected folder and dl_type for audit trail
+    SESSION_STATE['selected_folder'] = request.folder
+    SESSION_STATE['selected_dl_type'] = request.dl_type
+    
     with FTPConnection(FTP_CONFIG["hostname"], FTP_CONFIG["port"], FTP_CONFIG["username"], FTP_CONFIG["password"]) as ftp_conn:
         ftp = ftp_conn.connect()
         if not ftp:
             raise HTTPException(status_code=500, detail="Failed to connect to FTP")
         signature_img_path = fetch_signature_from_ftp(ftp)
         if not signature_img_path:
-            raise HTTPException(status_code=500, detail="Signature image not found")
+            raise HTTPException(status_code=500, detail="Failed to fetch signature from file server. Folder or file might not be created yet.")
         SESSION_STATE['files_to_cleanup'].append(signature_img_path)
         template_path = download_ftp_template(ftp, request.folder, request.template, is_header_footer=False)
         if not template_path:
@@ -743,7 +1260,7 @@ async def get_placeholders(request: TemplateRequest):
             SESSION_STATE['base_template'] = base_template
             placeholders = extract_placeholders(base_template)
             SESSION_STATE['placeholders'] = placeholders
-            return placeholders
+            return {"message": "Final template retrieved successfully", "placeholders": placeholders}
         finally:
             word_app.Quit()
             pythoncom.CoUninitialize()
@@ -759,7 +1276,6 @@ async def upload_excel(file: UploadFile = File(...)):
     if 'FINAL_AREA' not in df.columns or 'DL_CODE' not in df.columns:
         raise HTTPException(status_code=400, detail="Excel file must contain FINAL_AREA and DL_CODE columns")
     return {"data": df.to_dict(orient='records')}
-
 
 @app.post("/api/set_mode")
 async def set_mode(request: ModeRequest):
@@ -799,9 +1315,7 @@ async def set_mode(request: ModeRequest):
         "template_status": template_status
     }
 
-# ... (other imports and code remain unchanged until generate_pdfs_stream)
-
-async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFrame):
+async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFrame, user_info: dict):
     zipf = None
     try:
         if not SESSION_STATE.get('selected_mode'):
@@ -825,6 +1339,23 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
             return
 
         logger.info(f"Processing {total_records} records across {len(valid_rows.groupby('FINAL_AREA'))} FINAL_AREA groups")
+        
+        # Get user info for audit trail
+        user_email = user_info.get("email", "Unknown")
+        user_name = user_info.get("name", user_email)
+        selected_folder = SESSION_STATE.get('selected_folder', 'Unknown')
+        selected_mode = SESSION_STATE.get('selected_mode', 'Unknown')
+        
+        # Create audit trail entry and get its ID for linking processed accounts
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO audit_trail (client, processed_by, total_accounts, mode, template_folder, dl_type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (selected_folder, user_name, total_records, selected_mode, selected_folder, SESSION_STATE.get('selected_dl_type', 'Unknown')))
+        audit_id = cursor.lastrowid
+        conn.commit()
+        
         with TemporaryDirectory() as temp_zip_dir:
             zip_path = Path(temp_zip_dir) / "final_area_pdfs.zip"
             zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
@@ -841,6 +1372,11 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
 
                     processed_records = 0
                     start_time = time.time()
+                    
+                    # Store processed accounts in batches
+                    account_batch = []
+                    batch_size = 100
+                    
                     for final_area, group_df in valid_rows.groupby('FINAL_AREA'):
                         logger.debug(f"Processing FINAL_AREA: {final_area} ({len(group_df)} records)")
                         area_dir = OUTPUT_DIR / f"{final_area}"
@@ -850,9 +1386,28 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                         dl_pdf_merger = PdfMerger() if SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"] else None
                         transmittal_pdf_merger = PdfMerger() if SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"] else None
                         record_count = len(group_df)
+                        selected_mode = SESSION_STATE.get('selected_mode')
                         try:
                             if SESSION_STATE.get('selected_mode') in ["DL Only", "DL w/ Transmittal"]:
                                 for idx, row in group_df.iterrows():
+                                    # Store account data
+                                    account_batch.append((
+                                        audit_id,
+                                        row.get('DL_CODE', ''),
+                                        row.get('LEADS_CHNAME', ''),
+                                        row.get('DL_ADDRESS', ''),
+                                        row.get('FINAL_AREA', '')
+                                    ))
+                                    
+                                    # Process batch if it reaches the batch size
+                                    if len(account_batch) >= batch_size:
+                                        cursor.executemany(
+                                            "INSERT INTO processed_accounts (audit_id, dl_code, leads_chname, dl_address, final_area) VALUES (?, ?, ?, ?, ?)",
+                                            account_batch
+                                        )
+                                        conn.commit()
+                                        account_batch = []
+                                    
                                     barcode_buffer = None
                                     if barcode_value := row.get('DL_CODE', ''):
                                         barcode_buffer = generate_barcode(barcode_value)
@@ -878,9 +1433,29 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                         'progress': progress,
                                         'message': f"Processing record {processed_records}/{total_records} (FINAL_AREA: {final_area})"
                                     }) + '\n'
-                                    await asyncio.sleep(0)  # Allow event loop to process other tasks
+                                    await asyncio.sleep(0)
 
                             if SESSION_STATE.get('selected_mode') in ["DL w/ Transmittal", "Transmittal Only"]:
+                                # If we're only doing transmittal, we need to store the account data here
+                                if SESSION_STATE.get('selected_mode') == "Transmittal Only":
+                                    for _, row in group_df.iterrows():
+                                        account_batch.append((
+                                            audit_id,
+                                            row.get('DL_CODE', ''),
+                                            row.get('LEADS_CHNAME', ''),
+                                            row.get('DL_ADDRESS', ''),
+                                            row.get('FINAL_AREA', '')
+                                        ))
+                                        
+                                        # Process batch if it reaches the batch size
+                                        if len(account_batch) >= batch_size:
+                                            cursor.executemany(
+                                                "INSERT INTO processed_accounts (audit_id, dl_code, leads_chname, dl_address, final_area) VALUES (?, ?, ?, ?, ?)",
+                                                account_batch
+                                            )
+                                            conn.commit()
+                                            account_batch = []
+                                
                                 transmittal_docs = fill_transmittal_template(temp_transmittal_path, group_df)
                                 if transmittal_docs:
                                     for doc_idx, transmittal_doc in enumerate(transmittal_docs):
@@ -894,13 +1469,13 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                                 logger.debug(f"Converting {len(docx_files)} DOCX files for {final_area}")
                                 yield json.dumps({
                                     'progress': (processed_records / total_records) * 100,
-                                    'message': f"Converting {len(docx_files)} documents to PDF for {final_area}"
+                                    'message': f"Converting {len(docx_files)} {selected_mode} docx to PDF for {final_area}"
                                 }) + '\n'
                                 await asyncio.sleep(0)
                                 pdf_files = batch_convert_libreoffice(docx_files, area_dir)
                                 yield json.dumps({
                                     'progress': (processed_records / total_records) * 100,
-                                    'message': f"Converted {len(pdf_files)}/{len(docx_files)} PDFs for {final_area}"
+                                    'message': f"Converted {len(pdf_files)}/{len(docx_files)} {selected_mode} PDFs for {final_area}"
                                 }) + '\n'
                                 await asyncio.sleep(0)
                                 for pdf_file in pdf_files:
@@ -935,10 +1510,19 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                             if transmittal_pdf_merger:
                                 transmittal_pdf_merger.close()
                             cleanup_files(temp_files)
+                    
+                    # Insert any remaining accounts in the batch
+                    if account_batch:
+                        cursor.executemany(
+                            "INSERT INTO processed_accounts (audit_id, dl_code, leads_chname, dl_address, final_area) VALUES (?, ?, ?, ?, ?)",
+                            account_batch
+                        )
+                        conn.commit()
             finally:
                 if zipf:
                     zipf.close()
                     logger.debug(f"Closed ZipFile: {zip_path}")
+                conn.close()
 
             if zip_path.exists() and zip_path.stat().st_size > 0:
                 persistent_zip_path = OUTPUT_DIR / "final_area_pdfs.zip"
@@ -946,6 +1530,7 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
                 SESSION_STATE['download_completed'] = True
                 SESSION_STATE['zip_path'] = str(persistent_zip_path)
                 total_time = time.time() - start_time
+                
                 logger.info(f"Completed processing in {total_time:.1f}s")
                 yield json.dumps({
                     'progress': 100,
@@ -963,10 +1548,8 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
             zipf.close()
             logger.debug("Ensured ZipFile is closed in finally block")
 
-# ... (rest of the code remains unchanged, including /api/set_mode and other endpoints)
-
 @app.post("/api/generate_pdfs")
-async def generate_pdfs(file: UploadFile = File(...)):
+async def generate_pdfs(file: UploadFile = File(...), user_info: dict = Depends(get_current_user)):
     if not file.filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail="Invalid file format. Please upload an .xlsx file")
     df = get_raw_file(file)
@@ -974,7 +1557,7 @@ async def generate_pdfs(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Failed to read Excel file")
     if 'FINAL_AREA' not in df.columns or 'DL_CODE' not in df.columns:
         raise HTTPException(status_code=400, detail="Excel file must contain FINAL_AREA and DL_CODE columns")
-    return StreamingResponse(generate_pdfs_stream(file, df), media_type="text/event-stream")
+    return StreamingResponse(generate_pdfs_stream(file, df, user_info), media_type="text/event-stream")
 
 @app.get("/api/download_zip")
 async def download_zip():
@@ -1005,44 +1588,3 @@ async def cleanup():
     SESSION_STATE['placeholders'] = []
     SESSION_STATE['zip_path'] = None
     return {"success": True, "message": "Files cleaned up successfully"}
-
-@app.post("/api/set_mode")
-async def set_mode(request: ModeRequest):
-    if request.mode not in ["DL Only", "DL w/ Transmittal", "Transmittal Only"]:
-        raise HTTPException(status_code=400, detail="Invalid mode")
-    
-    SESSION_STATE['selected_mode'] = request.mode
-    template_status = {}
-
-    if request.mode in ["DL Only", "DL w/ Transmittal"]:
-        if SESSION_STATE.get('base_template') and SESSION_STATE.get('header_footer_template_path') and SESSION_STATE.get('template_path'):
-            template_status['dl_template'] = "DL and header/footer templates are ready"
-        else:
-            template_status['dl_template'] = "DL or header/footer template not loaded"
-
-    if request.mode in ["DL w/ Transmittal", "Transmittal Only"]:
-        try:
-            with FTPConnection(FTP_CONFIG["hostname"], FTP_CONFIG["port"], FTP_CONFIG["username"], FTP_CONFIG["password"]) as ftp_conn:
-                ftp = ftp_conn.connect()
-                if not ftp:
-                    raise HTTPException(status_code=500, detail="Failed to connect to FTP server")
-                transmittal_template = "Transmittal QRCODE.docx"
-                transmittal_template_path = download_ftp_template(ftp, None, transmittal_template, is_transmittal=True)
-                if not transmittal_template_path:
-                    raise HTTPException(status_code=500, detail=f"Failed to download transmittal template {transmittal_template}")
-                SESSION_STATE['files_to_cleanup'].append(transmittal_template_path)
-                SESSION_STATE['transmittal_template_path'] = transmittal_template_path
-                template_status['transmittal_template'] = "Transmittal template is ready"
-        except Exception as e:
-            logger.error(f"Failed to set mode {request.mode}: {e}")
-            template_status['transmittal_template'] = f"Failed to load transmittal template: {str(e)}"
-            raise HTTPException(status_code=500, detail=f"Failed to set mode: {str(e)}")
-
-    return {
-        "success": True,
-        "mode": request.mode,
-        "template_status": template_status
-    }
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
