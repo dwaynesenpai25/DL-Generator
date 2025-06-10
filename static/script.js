@@ -144,9 +144,6 @@ function setUserAvatar(userInfo) {
   const userAvatar = document.getElementById("userAvatar")
   const userAvatarFallback = document.getElementById("userAvatarFallback")
 
-  // Try different avatar URLs in order of preference
-  //   const avatarUrl = userInfo?.avatar_big || userInfo?.avatar_middle || userInfo?.avatar_thumb || userInfo?.avatar_url
-
   if (userInfo) {
     userAvatar.src = userInfo
     userAvatar.classList.remove("hidden")
@@ -300,10 +297,12 @@ function showSection(sectionId) {
   }
 }
 
-// Reset UI
+// Reset UI - FIXED: Preserve output format selection and prevent field resets
 function resetUI() {
+  document.getElementById("outputFormatSelect").value = ""
   document.getElementById("modeSelect").value = ""
-  document.getElementById("outputFormatSelect").value = "zip" // Reset to default
+  document.getElementById("modeCard").classList.add("hidden")
+
   document.getElementById("printFormatInfo").classList.add("hidden")
   document.getElementById("zipFormatInfo").classList.remove("hidden")
   document.getElementById("selectionSection").classList.add("hidden")
@@ -315,22 +314,39 @@ function resetUI() {
   document.getElementById("errorMessage").classList.add("hidden")
   document.getElementById("placeholdersDisplay").classList.add("hidden")
   document.getElementById("dataPreview").classList.add("hidden")
-  document.getElementById("resultSection").classList.add("hidden")
+
+  // FIXED: Clear result section properly to prevent button duplication
+  clearResultSection()
+
   document.getElementById("progressBar").style.width = "0%"
   document.getElementById("progressText").textContent = ""
   document.getElementById("excelUpload").value = ""
   document.getElementById("dataTable").innerHTML = ""
   document.getElementById("statusDisplay").classList.add("hidden")
-  // document.getElementById("contentStatus").classList.add("hidden")
-  // document.getElementById("templatecontentStatus").classList.add("hidden")
   document.getElementById("templateCombinedAlert").classList.add("hidden")
   document.getElementById("excelLoadingOverlay").classList.add("hidden")
-  document.getElementById("outputFormatSelect").value = "" // Reset to no selection
-  document.querySelector(".card:has(#modeSelect)").classList.add("hidden") // Hide mode selection
 
   // Reset processing state and re-enable inputs
   isProcessing = false
   toggleInputFields(false)
+}
+
+// FIXED: New function to properly clear result section
+function clearResultSection() {
+  const resultSection = document.getElementById("resultSection")
+  resultSection.classList.add("hidden")
+
+  // Remove any dynamically added print controls
+  const printControls = resultSection.querySelectorAll(".mt-4")
+  printControls.forEach((control) => {
+    if (control.querySelector("#printAreaSelect") || control.querySelector("#printerSelect")) {
+      control.remove()
+    }
+  })
+
+  // Reset buttons to hidden state
+  document.getElementById("downloadButton").classList.add("hidden")
+  document.getElementById("cleanupButton").classList.add("hidden")
 }
 
 // Show error
@@ -471,10 +487,6 @@ async function fetchTemplates(folder) {
       throw new Error("Invalid templates format received from server.")
     }
     const templateSelect = document.getElementById("templateSelect")
-    // if (data.message) {
-    //     document.getElementById("contentStatusText").textContent = data.message
-    //     document.getElementById("contentStatus").classList.remove("hidden")
-    // }
     templateSelect.innerHTML = '<option value="">Select Template</option>'
     templates.forEach((template) => {
       const option = document.createElement("option")
@@ -511,8 +523,6 @@ async function fetchPlaceholders(folder, dl_type, template) {
     const data = await response.json()
     const placeholdersList = document.getElementById("placeholdersList")
     if (data.message) {
-      // document.getElementById("templatecontentStatusText").textContent = data.message
-      // document.getElementById("templatecontentStatus").classList.remove("hidden")
       placeholdersList.innerHTML = ""
       const placeholders = data.placeholders || []
       placeholders.forEach((placeholder) => {
@@ -1261,7 +1271,10 @@ document.getElementById("refreshAuditButton").addEventListener("click", () => {
 document.getElementById("modeSelect").addEventListener("change", async (e) => {
   const mode = e.target.value
   if (!mode) {
-    resetUI()
+    // FIXED: Don't reset everything when mode is cleared, just clear mode-specific sections
+    document.getElementById("selectionSection").classList.add("hidden")
+    document.getElementById("uploadSection").classList.add("hidden")
+    document.getElementById("statusDisplay").classList.add("hidden")
     return
   }
   try {
@@ -1280,8 +1293,17 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
       throw new Error(errorData.detail || "Failed to set mode")
     }
     const data = await response.json()
-    resetUI()
+
+    // FIXED: Don't reset UI completely, just clear mode-specific sections
+    document.getElementById("selectionSection").classList.add("hidden")
+    document.getElementById("uploadSection").classList.add("hidden")
+    document.getElementById("placeholdersDisplay").classList.add("hidden")
+    document.getElementById("dataPreview").classList.add("hidden")
+    clearResultSection()
+
+    // Keep the mode selection
     document.getElementById("modeSelect").value = mode
+
     if (data.template_status?.transmittal_template) {
       document.getElementById("templateStatusText").textContent = data.template_status.transmittal_template
       document.getElementById("statusDisplay").classList.remove("hidden")
@@ -1300,7 +1322,7 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
   }
 })
 
-// Output Format Selection
+// FIXED: Output Format Selection - preserve selection and don't reset when mode changes
 document.getElementById("outputFormatSelect").addEventListener("change", async (e) => {
   const format = e.target.value
   if (!format) {
@@ -1460,6 +1482,10 @@ document.getElementById("generateButton").addEventListener("click", async () => 
   const cleanupButton = document.getElementById("cleanupButton")
   progressBar.style.width = "0%"
   progressText.textContent = "Starting processing..."
+
+  // FIXED: Clear result section before starting new processing
+  clearResultSection()
+
   const formData = new FormData()
   formData.append("file", file)
 

@@ -666,14 +666,12 @@ def combine_templates(header_footer_path, content_path, signature_img_path, word
     try:
         header_footer_doc = Document(header_footer_path)
         content_doc = Document(content_path)
-        # while header_footer_doc.paragraphs:
-        #     header_footer_doc.paragraphs[0]._element.getparent().remove(header_footer_doc.paragraphs[0]._element)
+        while header_footer_doc.paragraphs:
+            header_footer_doc.paragraphs[0]._element.getparent().remove(header_footer_doc.paragraphs[0]._element)
+
         for elem in content_doc.element.body:
             header_footer_doc.element.body.append(elem)
-        # for para in header_footer_doc.paragraphs:
-        #     para.paragraph_format.space_before = Pt(0)
-        #     para.paragraph_format.space_after = Pt(0)
-         # ✅ Set top margin to 1.04 inches
+
         for section in header_footer_doc.sections:
             section.header_distance = Inches(0.1)
             section.footer_distance = Inches(0.1)
@@ -1452,6 +1450,7 @@ async def generate_pdfs_stream(uploaded_file: UploadFile, dataframe: pd.DataFram
         logger.debug(f"Excel file loaded with {len(dataframe)} rows")
         today_date = datetime.now().strftime("%B %d, %Y")
         dataframe['DL_ADDRESS'] = dataframe['DL_ADDRESS'].str.upper()
+        dataframe['LEADS_NEW_OB'] = dataframe['LEADS_NEW_OB'].apply(lambda x: f"{float(x):,.2f}")
         valid_rows = dataframe[dataframe['LEADS_CHNAME'].notna()]
         total_records = len(valid_rows)
         if total_records == 0:
@@ -1733,14 +1732,16 @@ def print_docx_to_specific_printer(docx_files, printer_name=None):
     except Exception as e:
         logger.error(f"Failed to print DOCX files to {printer_name}: {e}")
         return False
+    
 def normalize_margins(doc_path):
     doc = Document(doc_path)
     for section in doc.sections:
         section.top_margin = Inches(0.5)
         section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
+        # section.left_margin = Inches(0.5)
+        # section.right_margin = Inches(0.5)
     doc.save(doc_path)
+    
 def print_to_specific_printer_docx(docx_files, printer_name):
     """Print DOCX files to a specific printer using Microsoft Word"""
     try:
