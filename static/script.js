@@ -70,6 +70,7 @@ function toggleInputFields(disabled) {
     "excelUpload",
     "generateButton",
     "outputFormatSelect",
+    "transmittalFolderSelect",
   ]
 
   inputs.forEach((id) => {
@@ -98,13 +99,14 @@ function toggleInputFields(disabled) {
 // Check existing session
 async function checkSession() {
   try {
-    const response = await fetch(`${API_BASE}/check_session`, {
+    const response = await fetch(`${API_BASE}/check_sessions`, {
       method: "GET",
       credentials: "include",
     })
-
+    console.log("sample",response)
     if (response.ok) {
       const data = await response.json()
+      console.log(data)
 
       if (data.success) {
         currentUser = {
@@ -173,32 +175,41 @@ function updateNavigationAccess() {
 }
 
 // Handle Lark callback
+let isProcessingCallback = false;
+
 async function handleLarkCallback(code) {
-  try {
-    const response = await fetch(`${API_BASE}/lark_callback?code=${code}`, {
-      method: "GET",
-      credentials: "include",
-    })
-    const data = await response.json()
-    if (data.success) {
-      currentUser = { username: data.username, role: data.role }
-      document.getElementById("loginModal").classList.add("hidden")
-      document.getElementById("mainContent").classList.remove("hidden")
-      document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`
-      window.history.replaceState({}, document.title, "/")
-
-      // Check session again to get full user data including access level
-      await checkSession()
-    } else {
-      document.getElementById("loginError").classList.remove("hidden")
-      document.getElementById("loginError").textContent = data.detail || "Authentication failed."
+    if (isProcessingCallback) {
+        console.log("Already processing callback, ignoring duplicate");
+        return;
     }
-  } catch (error) {
-    document.getElementById("loginError").classList.remove("hidden")
-    document.getElementById("loginError").textContent = "Authentication failed. Please try again."
-  }
+    isProcessingCallback = true;
+    console.log(`Handling Lark callback with code: ${code}`);
+    try {
+        const response = await fetch(`${API_BASE}/lark_callback?code=${code}`, {
+            method: "GET",
+            credentials: "include",
+        });
+        const data = await response.json();
+        console.log("Lark callback response:", data);
+        if (data.success) {
+            currentUser = { username: data.username, role: data.role };
+            document.getElementById("loginModal").classList.add("hidden");
+            document.getElementById("mainContent").classList.remove("hidden");
+            document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`;
+            window.history.replaceState({}, document.title, "/");
+            await checkSession();
+        } else {
+            document.getElementById("loginError").classList.remove("hidden");
+            document.getElementById("loginError").textContent = data.detail || "Authentication failed.";
+        }
+    } catch (error) {
+        console.error("Error in handleLarkCallback:", error);
+        document.getElementById("loginError").classList.remove("hidden");
+        document.getElementById("loginError").textContent = "Authentication failed. Please try again.";
+    } finally {
+        isProcessingCallback = false;
+    }
 }
-
 // Initiate Lark login
 document.getElementById("loginButton").addEventListener("click", () => {
   window.location.href = `${API_BASE}/login`
@@ -301,8 +312,9 @@ function showSection(sectionId) {
 function resetUI() {
   document.getElementById("outputFormatSelect").value = ""
   document.getElementById("modeSelect").value = ""
+  document.getElementById("transmittalFolderSelect").value = ""
   document.getElementById("modeCard").classList.add("hidden")
-
+  document.getElementById("transmittalFolderSection").classList.add("hidden")
   document.getElementById("printFormatInfo").classList.add("hidden")
   document.getElementById("zipFormatInfo").classList.remove("hidden")
   document.getElementById("selectionSection").classList.add("hidden")
@@ -351,12 +363,21 @@ function clearResultSection() {
 
 // Show error
 function showError(message) {
-  const errorDiv = document.getElementById("errorMessage")
-  errorDiv.querySelector("span").textContent = message
-  errorDiv.classList.remove("hidden")
-  setTimeout(() => errorDiv.classList.add("hidden"), 5000)
-}
+  const errorDiv = document.getElementById("errorMessage");
+  if (!errorDiv) {
+    console.error("Error: #errorMessage div not found in the DOM");
+    return;
+  }
 
+  const errorSpan = errorDiv.querySelector("span");
+  if (!errorSpan) {
+    console.error("Error: <span> element not found inside #errorMessage");
+    return;
+  }
+
+  errorSpan.textContent = message || "An unexpected error occurred.";
+  errorDiv.classList.remove("hidden");
+}
 // Show template combined alert
 function showTemplateCombinedAlert() {
   document.getElementById("templateCombinedAlert").classList.remove("hidden")
@@ -521,32 +542,95 @@ async function fetchPlaceholders(folder, dl_type, template) {
       throw new Error(errorData.detail || "Failed to fetch placeholders")
     }
     const data = await response.json()
+
+    const placeholdersList = document.getElementById("placeholdersList");
+    if (data.message) {
+      placeholdersList.innerHTML = "";
+      const placeholders = data.placeholders || [];
+      // Filter out placeholders starting with "IMAGE_" and clean «»
+      const filteredPlaceholders = placeholders
+        .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
+        .map((placeholder) => placeholder.replace(/«|»/g, ""));
+
+      if (filteredPlaceholders.length > 0) {
+        filteredPlaceholders.forEach((placeholder) => {
+          const li = document.createElement("li");
+          li.className = "flex items-center gap-2 text-sm text-text-secondary";
+          li.innerHTML = `
+            <div class="w-2 h-2 bg-accent rounded-full"></div>
+            <code class="bg-background px-2 py-1 rounded text-xs font-mono">${placeholder}</code>
+          `;
+          placeholdersList.appendChild(li);
+        });
+      } else {
+        placeholdersList.innerHTML = '<li class="text-sm text-text-secondary">No valid placeholders found.</li>';
+      }
+
+      document.getElementById("placeholdersDisplay").classList.remove("hidden");
+      document.getElementById("uploadSection").classList.remove("hidden");
+
+      // Check if template is already combined and show alert
+      if (data.template_combined === true) {
+        showTemplateCombinedAlert();
+      }
+    } else {
+      document.getElementById("templatecontentStatusText").textContent = data.detail;
+      document.getElementById("templatecontentStatus").classList.remove("hidden");
+    }
+  } catch (error) {
+    console.error("Error processing placeholders:", error);
+    showError("Failed to fetch placeholders. Please check template configuration.");
+  }
+}
+
+async function fetchTransmittalPlaceholders() {
+  try {
+    const response = await fetch(`${API_BASE}/transmittal_placeholders`, {
+      method: "GET",
+      credentials: "include",
+    })
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin()
+        return
+      }
+      const errorData = await response.json()
+      throw new Error(errorData.detail || "Failed to fetch transmittal placeholders")
+    }
+    const data = await response.json()
+
     const placeholdersList = document.getElementById("placeholdersList")
     if (data.message) {
       placeholdersList.innerHTML = ""
       const placeholders = data.placeholders || []
-      placeholders.forEach((placeholder) => {
-        const li = document.createElement("li")
-        li.className = "flex items-center gap-2 text-sm text-text-secondary"
-        li.innerHTML = `
-          <div class="w-2 h-2 bg-accent rounded-full"></div>
-          <code class="bg-background px-2 py-1 rounded text-xs font-mono">${placeholder}</code>
-        `
-        placeholdersList.appendChild(li)
-      })
+      // Filter out placeholders starting with "IMAGE_" and clean «»
+      const filteredPlaceholders = placeholders
+        .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
+        .map((placeholder) => placeholder.replace(/«|»/g, ""))
+
+      if (filteredPlaceholders.length > 0) {
+        filteredPlaceholders.forEach((placeholder) => {
+          const li = document.createElement("li")
+          li.className = "flex items-center gap-2 text-sm text-text-secondary"
+          li.innerHTML = `
+            <div class="w-2 h-2 bg-accent rounded-full"></div>
+            <code class="bg-background px-2 py-1 rounded text-xs font-mono">${placeholder}</code>
+          `
+          placeholdersList.appendChild(li)
+        })
+      } else {
+        placeholdersList.innerHTML = '<li class="text-sm text-text-secondary">No valid placeholders found.</li>'
+      }
+
       document.getElementById("placeholdersDisplay").classList.remove("hidden")
       document.getElementById("uploadSection").classList.remove("hidden")
-
-      // Check if template is already combined and show alert
-      if (data.template_combined === true) {
-        showTemplateCombinedAlert()
-      }
     } else {
-      document.getElementById("templatecontentStatusText").textContent = data.detail
-      document.getElementById("templatecontentStatus").classList.remove("hidden")
+      document.getElementById("templateStatusText").textContent = data.detail
+      document.getElementById("statusDisplay").classList.remove("hidden")
     }
   } catch (error) {
-    showError("Failed to fetch placeholders. Please check template configuration.")
+    console.error("Error processing transmittal placeholders:", error)
+    showError("Failed to fetch transmittal placeholders. Please check template configuration.")
   }
 }
 
@@ -1268,13 +1352,16 @@ document.getElementById("refreshAuditButton").addEventListener("click", () => {
 })
 
 // Event listeners for DL Generator
+// Replace the existing modeSelect event listener with this updated version
 document.getElementById("modeSelect").addEventListener("change", async (e) => {
   const mode = e.target.value
   if (!mode) {
     // FIXED: Don't reset everything when mode is cleared, just clear mode-specific sections
     document.getElementById("selectionSection").classList.add("hidden")
+    document.getElementById("transmittalFolderSection").classList.add("hidden")
     document.getElementById("uploadSection").classList.add("hidden")
     document.getElementById("statusDisplay").classList.add("hidden")
+    document.getElementById("placeholdersDisplay").classList.add("hidden")
     return
   }
   try {
@@ -1296,6 +1383,7 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
 
     // FIXED: Don't reset UI completely, just clear mode-specific sections
     document.getElementById("selectionSection").classList.add("hidden")
+    document.getElementById("transmittalFolderSection").classList.add("hidden")
     document.getElementById("uploadSection").classList.add("hidden")
     document.getElementById("placeholdersDisplay").classList.add("hidden")
     document.getElementById("dataPreview").classList.add("hidden")
@@ -1310,15 +1398,111 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
     } else {
       document.getElementById("statusDisplay").classList.add("hidden")
     }
+
     if (mode === "Transmittal Only") {
-      document.getElementById("uploadSection").classList.remove("hidden")
+      // For Transmittal Only mode, show folder selection first
+      document.getElementById("transmittalFolderSection").classList.remove("hidden")
+      await fetchFoldersForTransmittal()
+    } else if (mode === "DL w/ Transmittal") {
+      // For DL w/ Transmittal, show the selection section first
+      document.getElementById("selectionSection").classList.remove("hidden")
+      await fetchFolders()
     } else {
+      // For DL Only mode
       document.getElementById("selectionSection").classList.remove("hidden")
       await fetchFolders()
     }
   } catch (error) {
     showError("Failed to set mode. Please check if the backend server is running.")
     document.getElementById("modeSelect").value = ""
+  }
+})
+
+// Add new function to fetch folders for transmittal folder selection
+async function fetchFoldersForTransmittal() {
+  try {
+    const response = await fetch(`${API_BASE}/folders`, {
+      credentials: "include",
+    })
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin()
+        return
+      }
+      const errorData = await response.json()
+      throw new Error(errorData.detail || "Failed to fetch folders")
+    }
+    const folders = await response.json()
+    const transmittalFolderSelect = document.getElementById("transmittalFolderSelect")
+    transmittalFolderSelect.innerHTML = '<option value="">Select Client Folder</option>'
+    folders.forEach((folder) => {
+      const option = document.createElement("option")
+      option.value = folder
+      option.textContent = folder
+      transmittalFolderSelect.appendChild(option)
+    })
+  } catch (error) {
+    showError("Failed to fetch folders. Please check FTP configuration.")
+  }
+}
+
+// Add event listener for transmittal folder selection
+document.getElementById("transmittalFolderSelect").addEventListener("change", async (e) => {
+  const folder = e.target.value
+  if (folder) {
+    // Fetch transmittal placeholders with the selected folder
+    try {
+      const response = await fetch(`${API_BASE}/transmittal_placeholders?folder=${encodeURIComponent(folder)}`, {
+        method: "GET",
+        credentials: "include",
+      })
+      if (!response.ok) {
+        if (response.status === 401) {
+          redirectToLogin()
+          return
+        }
+        const errorData = await response.json()
+        throw new Error(errorData.detail || "Failed to fetch transmittal placeholders")
+      }
+      const data = await response.json()
+
+      const placeholdersList = document.getElementById("placeholdersList")
+      if (data.message) {
+        placeholdersList.innerHTML = ""
+        const placeholders = data.placeholders || []
+        // Filter out placeholders starting with "IMAGE_" and clean «»
+        const filteredPlaceholders = placeholders
+          .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
+          .map((placeholder) => placeholder.replace(/«|»/g, ""))
+
+        if (filteredPlaceholders.length > 0) {
+          filteredPlaceholders.forEach((placeholder) => {
+            const li = document.createElement("li")
+            li.className = "flex items-center gap-2 text-sm text-text-secondary"
+            li.innerHTML = `
+              <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+              <code class="bg-green-50 px-2 py-1 rounded text-xs font-mono">${placeholder}</code>
+            `
+            placeholdersList.appendChild(li)
+          })
+        } else {
+          placeholdersList.innerHTML = '<li class="text-sm text-text-secondary">No valid placeholders found.</li>'
+        }
+
+        document.getElementById("placeholdersDisplay").classList.remove("hidden")
+        document.getElementById("uploadSection").classList.remove("hidden")
+      } else {
+        document.getElementById("templateStatusText").textContent = data.detail
+        document.getElementById("statusDisplay").classList.remove("hidden")
+      }
+    } catch (error) {
+      console.error("Error processing transmittal placeholders:", error)
+      showError("Failed to fetch transmittal placeholders. Please check template configuration.")
+    }
+  } else {
+    // Hide placeholders and upload sections if no folder is selected
+    document.getElementById("placeholdersDisplay").classList.add("hidden")
+    document.getElementById("uploadSection").classList.add("hidden")
   }
 })
 
@@ -1376,13 +1560,141 @@ document.getElementById("dlTypeSelect").addEventListener("change", (e) => {
   }
 })
 
-document.getElementById("templateSelect").addEventListener("change", (e) => {
+// document.getElementById("templateSelect").addEventListener("change", (e) => {
+//   if (e.target.value) {
+//     fetchPlaceholders(
+//       document.getElementById("folderSelect").value,
+//       document.getElementById("dlTypeSelect").value,
+//       e.target.value,
+//     )
+//   }
+// })
+
+// Replace the existing modeSelect event listener with this updated version
+// document.getElementById("modeSelect").addEventListener("change", async (e) => {
+//   const mode = e.target.value
+//   if (!mode) {
+//     // FIXED: Don't reset everything when mode is cleared, just clear mode-specific sections
+//     document.getElementById("selectionSection").classList.add("hidden")
+//     document.getElementById("uploadSection").classList.add("hidden")
+//     document.getElementById("statusDisplay").classList.add("hidden")
+//     document.getElementById("placeholdersDisplay").classList.add("hidden")
+//     return
+//   }
+//   try {
+//     const response = await fetch(`${API_BASE}/set_mode`, {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({ mode }),
+//       credentials: "include",
+//     })
+//     if (!response.ok) {
+//       if (response.status === 401) {
+//         redirectToLogin()
+//         return
+//       }
+//       const errorData = await response.json()
+//       throw new Error(errorData.detail || "Failed to set mode")
+//     }
+//     const data = await response.json()
+
+//     // FIXED: Don't reset UI completely, just clear mode-specific sections
+//     document.getElementById("selectionSection").classList.add("hidden")
+//     document.getElementById("uploadSection").classList.add("hidden")
+//     document.getElementById("placeholdersDisplay").classList.add("hidden")
+//     document.getElementById("dataPreview").classList.add("hidden")
+//     clearResultSection()
+
+//     // Keep the mode selection
+//     document.getElementById("modeSelect").value = mode
+
+//     if (data.template_status?.transmittal_template) {
+//       document.getElementById("templateStatusText").textContent = data.template_status.transmittal_template
+//       document.getElementById("statusDisplay").classList.remove("hidden")
+//     } else {
+//       document.getElementById("statusDisplay").classList.add("hidden")
+//     }
+
+//     if (mode === "Transmittal Only") {
+//       // For Transmittal Only mode, fetch transmittal placeholders directly
+//       await fetchTransmittalPlaceholders()
+//       document.getElementById("uploadSection").classList.remove("hidden")
+//     } else if (mode === "DL w/ Transmittal") {
+//       // For DL w/ Transmittal, show the selection section first
+//       document.getElementById("selectionSection").classList.remove("hidden")
+//       await fetchFolders()
+//     } else {
+//       // For DL Only mode
+//       document.getElementById("selectionSection").classList.remove("hidden")
+//       await fetchFolders()
+//     }
+//   } catch (error) {
+//     showError("Failed to set mode. Please check if the backend server is running.")
+//     document.getElementById("modeSelect").value = ""
+//   }
+// })
+
+// Update the template selection handler to fetch transmittal placeholders when in DL w/ Transmittal mode
+document.getElementById("templateSelect").addEventListener("change", async (e) => {
   if (e.target.value) {
-    fetchPlaceholders(
-      document.getElementById("folderSelect").value,
-      document.getElementById("dlTypeSelect").value,
-      e.target.value,
-    )
+    const mode = document.getElementById("modeSelect").value
+    const folder = document.getElementById("folderSelect").value
+    const dlType = document.getElementById("dlTypeSelect").value
+    const template = e.target.value
+
+    // First fetch regular template placeholders
+    await fetchPlaceholders(folder, dlType, template)
+
+    // If in DL w/ Transmittal mode, also fetch transmittal placeholders and combine them
+    if (mode === "DL w/ Transmittal") {
+      try {
+        const response = await fetch(`${API_BASE}/transmittal_placeholders`, {
+          method: "GET",
+          credentials: "include",
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const placeholdersList = document.getElementById("placeholdersList")
+
+          // Add a separator for transmittal placeholders
+          const separator = document.createElement("li")
+          separator.className = "py-2 border-t border-border-light mt-2 pt-2"
+          separator.innerHTML = `
+            <div class="flex items-center gap-2">
+              <div class="w-4 h-4 bg-purple-500 rounded-full"></div>
+              <span class="font-medium text-purple-700">Transmittal Placeholders</span>
+            </div>
+          `
+          placeholdersList.appendChild(separator)
+
+          // Add transmittal placeholders
+          const transmittalPlaceholders = data.placeholders || []
+          const filteredTransmittalPlaceholders = transmittalPlaceholders
+            .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
+            .map((placeholder) => placeholder.replace(/«|»/g, ""))
+
+          if (filteredTransmittalPlaceholders.length > 0) {
+            filteredTransmittalPlaceholders.forEach((placeholder) => {
+              const li = document.createElement("li")
+              li.className = "flex items-center gap-2 text-sm text-purple-600"
+              li.innerHTML = `
+                <div class="w-2 h-2 bg-purple-500 rounded-full"></div>
+                <code class="bg-purple-50 px-2 py-1 rounded text-xs font-mono">${placeholder}</code>
+              `
+              placeholdersList.appendChild(li)
+            })
+          } else {
+            const li = document.createElement("li")
+            li.className = "text-sm text-purple-600"
+            li.textContent = "No transmittal placeholders found."
+            placeholdersList.appendChild(li)
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching transmittal placeholders:", error)
+      }
+    }
   }
 })
 
@@ -1400,13 +1712,15 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
         body: formData,
       })
       const data = await response.json()
-
+      
       // Hide loading overlay
       document.getElementById("excelLoadingOverlay").classList.add("hidden")
 
-      if (data.error) {
-        showError(data.error)
-        return
+      if (!response.ok) {
+        // Display error message from server
+        console.log("1",  data.detail)
+        showError(data.detail || "An error occurred while uploading the file.");
+        return;
       }
 
       const tableContainer = document.getElementById("dataTable")

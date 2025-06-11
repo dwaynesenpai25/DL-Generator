@@ -276,6 +276,29 @@
                         </div>
                     </div>
 
+                    <!-- Transmittal Only Folder Selection -->
+                    <div id="transmittalFolderSection" class="hidden">
+                        <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-10 h-10 bg-green-500 bg-opacity-10 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4">
+                                        </path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-text-primary">Client Selection</h3>
+                                    <p class="text-sm text-text-secondary">Select the client folder for audit tracking</p>
+                                </div>
+                            </div>
+                            <select id="transmittalFolderSelect"
+                                class="w-full p-3 border border-border-medium rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-surface">
+                                <option value="">Select Client Folder</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <!-- Selection Section -->
                     <div id="selectionSection" class="hidden">
                         <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6">
@@ -332,12 +355,33 @@
                         </div>
                     </div>
 
-
-
                     <!-- File Upload Section -->
                     <div id="uploadSection" class="hidden">
                         <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6 relative">
                             <!-- Loading Overlay for Excel Upload -->
+                            <div id="errorMessage" class="hidden mb-4">
+                                <div class="bg-red-50 border border-red-200 rounded-xl p-4 animate-fade-in">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                                            <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor"
+                                                viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <p class="font-medium text-red-900">Error</p>
+                                            <p class="text-sm text-red-700"><span id="errorText"></span></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4 bg-gray-50 border-l-4 border-blue-400 p-4 rounded">
+                                <strong class="block font-medium text-gray-700 mb-1">Note:</strong>
+                                The placeholders listed above are variables detected in your template. Ensure these
+                                match the column names in your uploaded Excel file for successful processing.
+                            </p>
+
                             <div id="excelLoadingOverlay"
                                 class="hidden absolute inset-0 loading-overlay rounded-xl flex items-center justify-center z-10">
                                 <div class="text-center">
@@ -437,7 +481,7 @@
                                         </div>
                                         <div>
                                             <p class="font-medium text-red-900">Error</p>
-                                            <p class="text-sm text-red-700"><span></span></p>
+                                            <p class="text-sm text-red-700"><span id="errorText"></span></p>
                                         </div>
                                     </div>
                                 </div>
