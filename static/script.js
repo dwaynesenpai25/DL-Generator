@@ -1,11 +1,10 @@
 let currentUser = null
 const API_BASE = "http://localhost:5000/api"
-let isProcessing = false // Track processing state
+let isProcessing = false
 
 // Initialize UI and check session
 document.addEventListener("DOMContentLoaded", async () => {
   showSection("dlGeneratorSection")
-  // Hide mode selection initially until output format is selected
   document.querySelector(".card:has(#modeSelect)").classList.add("hidden")
   setupMobileMenu()
   setupFolderSelectionButtons()
@@ -16,6 +15,234 @@ document.addEventListener("DOMContentLoaded", async () => {
     await checkSession()
   }
 })
+
+// Enhanced progress display with detailed stages
+function updateProgressDisplay(data) {
+  const progressBar = document.getElementById("progressBar")
+  const progressText = document.getElementById("progressText")
+  const progressSection = document.getElementById("progressSection")
+
+  if (!progressBar || !progressText) return
+
+  // Update progress bar
+  progressBar.style.width = `${data.progress}%`
+
+  // Enhanced progress text with stage indicators
+  let stageIcon = "🔄"
+  let stageColor = "text-blue-600"
+
+  switch (data.stage) {
+    case "area_processing":
+      stageIcon = "🏢"
+      stageColor = "text-purple-600"
+      break
+    case "document_generation":
+      stageIcon = "📝"
+      stageColor = "text-green-600"
+      break
+    case "transmittal_generation":
+      stageIcon = "📋"
+      stageColor = "text-orange-600"
+      break
+    case "pdf_conversion_start":
+    case "conversion":
+      stageIcon = "🔄"
+      stageColor = "text-blue-600"
+      break
+    case "conversion_complete":
+      stageIcon = "✅"
+      stageColor = "text-green-600"
+      break
+    case "pdf_merging":
+      stageIcon = "📑"
+      stageColor = "text-indigo-600"
+      break
+    case "print_preparation":
+      stageIcon = "📄"
+      stageColor = "text-cyan-600"
+      break
+    case "complete":
+      stageIcon = "🎉"
+      stageColor = "text-green-600"
+      break
+    case "error":
+      stageIcon = "❌"
+      stageColor = "text-red-600"
+      break
+  }
+
+  progressText.innerHTML = `<span class="${stageColor}">${stageIcon}</span> ${data.message}`
+
+  // Add detailed progress information if available and not in complete stage
+  if (
+    (data.area_details || data.document_details || data.transmittal_details || data.conversion_details) &&
+    data.stage !== "complete"
+  ) {
+    const detailsContainer = document.getElementById("progressDetails") || createProgressDetailsContainer()
+    updateProgressDetails(detailsContainer, data)
+  } else if (data.stage === "complete") {
+    // Hide progress details when complete
+    const detailsContainer = document.getElementById("progressDetails")
+    if (detailsContainer) {
+      detailsContainer.classList.add("hidden")
+    }
+  }
+}
+
+function createProgressDetailsContainer() {
+  const progressSection = document.getElementById("progressSection")
+  const detailsContainer = document.createElement("div")
+  detailsContainer.id = "progressDetails"
+  detailsContainer.className = "mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200"
+
+  const progressBar = document.getElementById("progressBar").parentElement
+  progressBar.parentElement.insertBefore(detailsContainer, progressBar.nextSibling)
+
+  return detailsContainer
+}
+
+function updateProgressDetails(container, data) {
+  let detailsHTML = ""
+
+  if (data.area_details) {
+    detailsHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Current Area</div>
+          <div class="text-lg font-bold text-purple-600">${data.area_details.current_area || "Processing..."}</div>
+        </div>
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Progress</div>
+          <div class="text-lg font-bold text-blue-600">${data.area_details.area_index || 0}/${data.area_details.total_areas || 0}</div>
+        </div>
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Records in Area</div>
+          <div class="text-lg font-bold text-green-600">${data.area_details.records_in_area || 0}</div>
+        </div>
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Completion</div>
+          <div class="text-lg font-bold text-indigo-600">${Math.round(data.progress || 0)}%</div>
+        </div>
+      </div>
+    `
+  } else if (data.document_details) {
+    detailsHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Client</div>
+          <div class="text-sm font-bold text-green-600">${data.document_details.client_name || "Processing..."}</div>
+        </div>
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">DL Code</div>
+          <div class="text-sm font-mono font-bold text-blue-600">${data.document_details.dl_code || "N/A"}</div>
+        </div>
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Area Progress</div>
+          <div class="text-lg font-bold text-purple-600">${data.document_details.record_index || 0}/${data.document_details.total_records_in_area || 0}</div>
+        </div>
+        <div class="bg-white p-3 rounded border">
+          <div class="font-medium text-gray-600">Current Area</div>
+          <div class="text-sm font-bold text-orange-600">${data.document_details.area || "Processing..."}</div>
+        </div>
+      </div>
+    `
+  } else if (data.transmittal_details) {
+    detailsHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div class="bg-white p-3 rounded border">
+        <div class="font-medium text-gray-600">Current Area</div>
+        <div class="text-sm font-bold text-orange-600">${data.transmittal_details.area || "Processing..."}</div>
+      </div>
+      <div class="bg-white p-3 rounded border">
+        <div class="font-medium text-gray-600">Current Page</div>
+        <div class="text-lg font-bold text-purple-600">${data.transmittal_details.current_page || 0}/${data.transmittal_details.total_pages || 0}</div>
+      </div>
+      <div class="bg-white p-3 rounded border">
+        <div class="font-medium text-gray-600">Records/Page</div>
+        <div class="text-lg font-bold text-green-600">${data.transmittal_details.records_per_page || 0}</div>
+      </div>
+      <div class="bg-white p-3 rounded border">
+        <div class="font-medium text-gray-600">Progress</div>
+        <div class="text-lg font-bold text-indigo-600">${Math.round(data.progress || 0)}%</div>
+      </div>
+    </div>
+  `
+  } else if (data.conversion_details) {
+    if (data.conversion_details.current_batch) {
+      detailsHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Current Batch</div>
+            <div class="text-lg font-bold text-blue-600">${data.conversion_details.current_batch || 0}/${data.conversion_details.total_batches || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Batch Size</div>
+            <div class="text-lg font-bold text-green-600">${data.conversion_details.batch_size || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Attempt</div>
+            <div class="text-lg font-bold text-orange-600">${data.conversion_details.attempt || 1}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Progress</div>
+            <div class="text-lg font-bold text-indigo-600">${Math.round(data.progress || 0)}%</div>
+          </div>
+        </div>
+      `
+    } else if (data.conversion_details.successful !== undefined) {
+      const successRate = data.conversion_details.success_rate || 0
+      const statusColor = successRate > 90 ? "text-green-600" : successRate > 70 ? "text-yellow-600" : "text-red-600"
+
+      detailsHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Successful</div>
+            <div class="text-lg font-bold text-green-600">${data.conversion_details.successful || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Failed</div>
+            <div class="text-lg font-bold text-red-600">${data.conversion_details.failed || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Success Rate</div>
+            <div class="text-lg font-bold ${statusColor}">${successRate.toFixed(1)}%</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Batch Time</div>
+            <div class="text-lg font-bold text-blue-600">${data.conversion_details.batch_time?.toFixed(1) || 0}s</div>
+          </div>
+        </div>
+      `
+    } else {
+      // Basic conversion details without specific batch info
+      detailsHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Total Files</div>
+            <div class="text-lg font-bold text-blue-600">${data.conversion_details.total_files || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Total Batches</div>
+            <div class="text-lg font-bold text-green-600">${data.conversion_details.total_batches || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Batch Size</div>
+            <div class="text-lg font-bold text-orange-600">${data.conversion_details.batch_size || 0}</div>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <div class="font-medium text-gray-600">Progress</div>
+            <div class="text-lg font-bold text-indigo-600">${Math.round(data.progress || 0)}%</div>
+          </div>
+        </div>
+      `
+    }
+  }
+
+  if (detailsHTML) {
+    container.innerHTML = detailsHTML
+    container.classList.remove("hidden")
+  }
+}
 
 // Setup mobile menu functionality
 function setupMobileMenu() {
@@ -33,7 +260,6 @@ function setupMobileMenu() {
     mobileMenuOverlay.classList.add("hidden")
   })
 
-  // Close mobile menu when clicking nav items
   const navItems = document.querySelectorAll(".nav-item")
   navItems.forEach((item) => {
     item.addEventListener("click", () => {
@@ -43,7 +269,6 @@ function setupMobileMenu() {
   })
 }
 
-// Setup folder selection buttons
 function setupFolderSelectionButtons() {
   document.getElementById("selectAllFolders").addEventListener("click", () => {
     const checkboxes = document.querySelectorAll('#modalClients input[type="checkbox"]')
@@ -60,7 +285,6 @@ function setupFolderSelectionButtons() {
   })
 }
 
-// Function to disable/enable all input fields
 function toggleInputFields(disabled) {
   const inputs = [
     "modeSelect",
@@ -85,7 +309,6 @@ function toggleInputFields(disabled) {
     }
   })
 
-  // Also disable the upload label
   const uploadLabel = document.getElementById("uploadLabel")
   if (uploadLabel) {
     if (disabled) {
@@ -96,17 +319,15 @@ function toggleInputFields(disabled) {
   }
 }
 
-// Check existing session
 async function checkSession() {
   try {
     const response = await fetch(`${API_BASE}/check_sessions`, {
       method: "GET",
       credentials: "include",
     })
-    console.log("sample", response)
+
     if (response.ok) {
       const data = await response.json()
-      console.log(data)
 
       if (data.success) {
         currentUser = {
@@ -120,13 +341,8 @@ async function checkSession() {
         document.getElementById("mainContent").classList.remove("hidden")
         document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`
 
-        // Set user avatar
         setUserAvatar(currentUser.userInfo)
-        console.log(currentUser)
-
-        // Show/hide navigation based on access level
         updateNavigationAccess()
-
         fetchFolders()
       } else {
         showLoginModal()
@@ -140,9 +356,7 @@ async function checkSession() {
   }
 }
 
-// Set user avatar
 function setUserAvatar(userInfo) {
-  console.log("User info for avatar:", userInfo)
   const userAvatar = document.getElementById("userAvatar")
   const userAvatarFallback = document.getElementById("userAvatarFallback")
 
@@ -150,72 +364,65 @@ function setUserAvatar(userInfo) {
     userAvatar.src = userInfo
     userAvatar.classList.remove("hidden")
     userAvatarFallback.classList.add("hidden")
-    console.log("Avatar set to:", userInfo)
   } else {
     userAvatar.classList.add("hidden")
     userAvatarFallback.classList.remove("hidden")
-    console.log("No avatar URL found, using fallback")
   }
 }
 
-// Update navigation access based on user role
 function updateNavigationAccess() {
   const userManagementMenu = document.getElementById("userManagementMenu")
   const auditTrailMenu = document.getElementById("auditTrailMenu")
 
   if (currentUser && currentUser.access === "admin") {
-    // Admin can see all menu items
     userManagementMenu.style.display = "flex"
     auditTrailMenu.style.display = "flex"
   } else {
-    // User can only see DL Generator
     userManagementMenu.style.display = "none"
     auditTrailMenu.style.display = "none"
   }
 }
 
-// Handle Lark callback
-let isProcessingCallback = false;
+let isProcessingCallback = false
 
 async function handleLarkCallback(code) {
   if (isProcessingCallback) {
-    console.log("Already processing callback, ignoring duplicate");
-    return;
+    console.log("Already processing callback, ignoring duplicate")
+    return
   }
-  isProcessingCallback = true;
-  console.log(`Handling Lark callback with code: ${code}`);
+  isProcessingCallback = true
+
   try {
     const response = await fetch(`${API_BASE}/lark_callback?code=${code}`, {
       method: "GET",
       credentials: "include",
-    });
-    const data = await response.json();
-    console.log("Lark callback response:", data);
+    })
+    const data = await response.json()
+
     if (data.success) {
-      currentUser = { username: data.username, role: data.role };
-      document.getElementById("loginModal").classList.add("hidden");
-      document.getElementById("mainContent").classList.remove("hidden");
-      document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`;
-      window.history.replaceState({}, document.title, "/");
-      await checkSession();
+      currentUser = { username: data.username, role: data.role }
+      document.getElementById("loginModal").classList.add("hidden")
+      document.getElementById("mainContent").classList.remove("hidden")
+      document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`
+      window.history.replaceState({}, document.title, "/")
+      await checkSession()
     } else {
-      document.getElementById("loginError").classList.remove("hidden");
-      document.getElementById("loginError").textContent = data.detail || "Authentication failed.";
+      document.getElementById("loginError").classList.remove("hidden")
+      document.getElementById("loginError").textContent = data.detail || "Authentication failed."
     }
   } catch (error) {
-    console.error("Error in handleLarkCallback:", error);
-    document.getElementById("loginError").classList.remove("hidden");
-    document.getElementById("loginError").textContent = "Authentication failed. Please try again.";
+    console.error("Error in handleLarkCallback:", error)
+    document.getElementById("loginError").classList.remove("hidden")
+    document.getElementById("loginError").textContent = "Authentication failed. Please try again."
   } finally {
-    isProcessingCallback = false;
+    isProcessingCallback = false
   }
 }
-// Initiate Lark login
+
 document.getElementById("loginButton").addEventListener("click", () => {
   window.location.href = `${API_BASE}/login`
 })
 
-// Logout handling
 document.getElementById("logoutButton").addEventListener("click", async () => {
   try {
     const response = await fetch(`${API_BASE}/logout`, {
@@ -236,14 +443,12 @@ document.getElementById("logoutButton").addEventListener("click", async () => {
   }
 })
 
-// Show login modal
 function showLoginModal() {
   document.getElementById("mainContent").classList.add("hidden")
   document.getElementById("loginModal").classList.remove("hidden")
   document.getElementById("loginError").classList.add("hidden")
 }
 
-// Redirect to login on session expiration
 function redirectToLogin() {
   currentUser = null
   showLoginModal()
@@ -251,13 +456,12 @@ function redirectToLogin() {
   showError("Session expired. Please log in again.")
 }
 
-// Update page title and subtitle
 function updatePageTitle(title, subtitle) {
   document.getElementById("pageTitle").textContent = title
   document.getElementById("pageSubtitle").textContent = subtitle
 }
 
-// Sidebar navigation
+// Navigation handlers
 document.getElementById("dlGeneratorMenu").addEventListener("click", (e) => {
   e.preventDefault()
   showSection("dlGeneratorSection")
@@ -286,14 +490,12 @@ document.getElementById("userManagementMenu").addEventListener("click", (e) => {
   updateUserTable()
 })
 
-// Show specific section
 function showSection(sectionId) {
   document.getElementById("dlGeneratorSection").classList.add("hidden")
   document.getElementById("userManagementSection").classList.add("hidden")
   document.getElementById("auditTrailSection").classList.add("hidden")
   document.getElementById(sectionId).classList.remove("hidden")
 
-  // Update navigation active states
   const navItems = document.querySelectorAll(".nav-item")
   navItems.forEach((item) => {
     item.classList.remove("active")
@@ -308,12 +510,11 @@ function showSection(sectionId) {
   }
 }
 
-// Reset UI - FIXED: Preserve output format selection and prevent field resets
 function resetUI() {
   document.getElementById("outputFormatSelect").value = ""
   document.getElementById("modeSelect").value = ""
   document.getElementById("transmittalFolderSelect").value = ""
-  document.getElementById("modeCard").classList.add("hidden")
+  document.querySelector(".card:has(#modeSelect)").classList.add("hidden")
   document.getElementById("transmittalFolderSection").classList.add("hidden")
   document.getElementById("printFormatInfo").classList.add("hidden")
   document.getElementById("zipFormatInfo").classList.remove("hidden")
@@ -327,7 +528,6 @@ function resetUI() {
   document.getElementById("placeholdersDisplay").classList.add("hidden")
   document.getElementById("dataPreview").classList.add("hidden")
 
-  // FIXED: Clear result section properly to prevent button duplication
   clearResultSection()
 
   document.getElementById("progressBar").style.width = "0%"
@@ -338,61 +538,60 @@ function resetUI() {
   document.getElementById("templateCombinedAlert").classList.add("hidden")
   document.getElementById("excelLoadingOverlay").classList.add("hidden")
 
-  // Reset processing state and re-enable inputs
+  // Clear progress details
+  const progressDetails = document.getElementById("progressDetails")
+  if (progressDetails) {
+    progressDetails.remove()
+  }
+
   isProcessing = false
   toggleInputFields(false)
 }
 
-// FIXED: New function to properly clear result section
 function clearResultSection() {
   const resultSection = document.getElementById("resultSection")
   resultSection.classList.add("hidden")
 
-  // Remove any dynamically added print controls
-  const printControls = resultSection.querySelectorAll(".mt-4")
+  const printControls = resultSection.querySelectorAll(".mt-4, .mt-6")
   printControls.forEach((control) => {
-    if (control.querySelector("#printAreaSelect") || control.querySelector("#printerSelect")) {
+    if (
+      control.querySelector("#printAreaSelect") ||
+      control.querySelector("#printerSelect") ||
+      control.classList.contains("mt-6")
+    ) {
       control.remove()
     }
   })
 
-  // Reset buttons to hidden state
   document.getElementById("downloadButton").classList.add("hidden")
   document.getElementById("cleanupButton").classList.add("hidden")
 }
 
-// Show error
 function showError(message, isCritical = false) {
-  const errorDiv = document.getElementById("errorMessage") // This is the progress section's error
-  const generalErrorContainer = document.getElementById("generalErrorContainer") // A new general error display
+  const errorDiv = document.getElementById("errorMessage")
+  const generalErrorContainer = document.getElementById("generalErrorContainer")
 
   let displayMessage = message || "An unexpected error occurred. Please try again."
   if (typeof message === "object" && message !== null) {
-    // Handle cases where message might be an error object or complex response
     if (message.detail) displayMessage = message.detail
     else if (message.message) displayMessage = message.message
     else displayMessage = JSON.stringify(message)
   }
 
-  // Option 1: Use the existing error display in the progress section
   if (errorDiv && errorDiv.offsetParent !== null) {
-    // Check if progressSection is visible
-    const errorTextSpan = errorDiv.querySelector("#errorText") // Assuming #errorText is the span inside #errorMessage
+    const errorTextSpan = errorDiv.querySelector("#errorText")
     if (errorTextSpan) {
       errorTextSpan.textContent = displayMessage
       errorDiv.classList.remove("hidden")
     } else {
-      // Fallback if structure is different
       errorDiv.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 animate-fade-in">...${displayMessage}</div>`
       errorDiv.classList.remove("hidden")
     }
-  }
-  // Option 2: Use a more general, perhaps toast-like notification (if generalErrorContainer exists)
-  else if (generalErrorContainer) {
+  } else if (generalErrorContainer) {
     generalErrorContainer.innerHTML = `
       <div class="fixed top-4 right-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md shadow-lg z-50 animate-fade-in" role="alert">
         <div class="flex">
-          <div class="py-1"><svg class="fill-current h-6 w-6 text-red-500 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM11.414 10l2.829-2.828-1.415-1.415L10 8.586 7.172 5.757 5.757 7.172 8.586 10l-2.829 2.828 1.415 1.415L10 11.414l2.828 2.829 1.415-1.415L11.414 10z"/></svg></div>
+          <div class="py-1"><svg class="fill-current h-6 w-6 text-red-500 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM11.414 10l2.829-2.828-1.415-1.415L10 8.586 7.172 5.757 5.757 7.172 8.586 10l-2.829 2.828 1.415 1.415L10 11.414l2.828 2.829 1.415-1.415L11.414 10z"/></svg></div>
           <div>
             <p class="font-bold">Error</p>
             <p class="text-sm">${displayMessage}</p>
@@ -403,21 +602,18 @@ function showError(message, isCritical = false) {
     generalErrorContainer.classList.remove("hidden")
     setTimeout(() => {
       generalErrorContainer.classList.add("hidden")
-      generalErrorContainer.innerHTML = "" // Clear content
-    }, 5000) // Hide after 5 seconds
-  }
-  // Fallback to console if no UI element found
-  else {
+      generalErrorContainer.innerHTML = ""
+    }, 5000)
+  } else {
     console.error("Error display UI element not found. Raw error:", displayMessage)
   }
 
   if (isCritical) {
-    // Potentially disable parts of the UI or guide user
     console.warn("A critical error occurred:", displayMessage)
-    toggleInputFields(true) // Example: disable inputs on critical error
+    toggleInputFields(true)
   }
 }
-// Show template combined alert
+
 function showTemplateCombinedAlert() {
   document.getElementById("templateCombinedAlert").classList.remove("hidden")
 }
@@ -591,43 +787,43 @@ async function fetchPlaceholders(folder, dl_type, template) {
     }
     const data = await response.json()
 
-    const placeholdersList = document.getElementById("placeholdersList");
+    const placeholdersList = document.getElementById("placeholdersList")
     if (data.message) {
-      placeholdersList.innerHTML = "";
-      const placeholders = data.placeholders || [];
+      placeholdersList.innerHTML = ""
+      const placeholders = data.placeholders || []
       // Filter out placeholders starting with "IMAGE_" and clean «»
       const filteredPlaceholders = placeholders
         .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
-        .map((placeholder) => placeholder.replace(/«|»/g, ""));
+        .map((placeholder) => placeholder.replace(/«|»/g, ""))
 
       if (filteredPlaceholders.length > 0) {
         filteredPlaceholders.forEach((placeholder) => {
-          const li = document.createElement("li");
-          li.className = "flex items-center gap-2 text-sm text-text-secondary";
+          const li = document.createElement("li")
+          li.className = "flex items-center gap-2 text-sm text-text-secondary"
           li.innerHTML = `
             <div class="w-2 h-2 bg-accent rounded-full"></div>
             <code class="bg-background px-2 py-1 rounded text-xs font-mono">${placeholder}</code>
-          `;
-          placeholdersList.appendChild(li);
-        });
+          `
+          placeholdersList.appendChild(li)
+        })
       } else {
-        placeholdersList.innerHTML = '<li class="text-sm text-text-secondary">No valid placeholders found.</li>';
+        placeholdersList.innerHTML = '<li class="text-sm text-text-secondary">No valid placeholders found.</li>'
       }
 
-      document.getElementById("placeholdersDisplay").classList.remove("hidden");
-      document.getElementById("uploadSection").classList.remove("hidden");
+      document.getElementById("placeholdersDisplay").classList.remove("hidden")
+      document.getElementById("uploadSection").classList.remove("hidden")
 
       // Check if template is already combined and show alert
       if (data.template_combined === true) {
-        showTemplateCombinedAlert();
+        showTemplateCombinedAlert()
       }
     } else {
-      document.getElementById("templatecontentStatusText").textContent = data.detail;
-      document.getElementById("templatecontentStatus").classList.remove("hidden");
+      document.getElementById("templatecontentStatusText").textContent = data.detail
+      document.getElementById("templatecontentStatus").classList.remove("hidden")
     }
   } catch (error) {
-    console.error("Error processing placeholders:", error);
-    showError("Failed to fetch placeholders. Please check template configuration.");
+    console.error("Error processing placeholders:", error)
+    showError("Failed to fetch placeholders. Please check template configuration.")
   } finally {
     // Hide loading overlay
     document.getElementById("placeholdersLoadingOverlay").classList.add("hidden")
@@ -1056,10 +1252,11 @@ async function showAuditDetails(auditId, page = 1) {
               </tr>
             </thead>
             <tbody id="accountDetailsList" class="divide-y divide-border-light">
-              ${details.accounts.length > 0
-        ? details.accounts
-          .map(
-            (account, index) => `
+              ${
+                details.accounts.length > 0
+                  ? details.accounts
+                      .map(
+                        (account, index) => `
                   <tr class="hover:bg-surface-hover transition-colors ${index % 2 === 0 ? "bg-gray-50" : "bg-white"}">
                     <td class="px-6 py-4">
                       <div class="flex items-center gap-3">
@@ -1084,10 +1281,10 @@ async function showAuditDetails(auditId, page = 1) {
                     </td>
                   </tr>
                 `,
-          )
-          .join("")
-        : '<tr><td colspan="4" class="px-6 py-12 text-center text-text-secondary"><div class="flex flex-col items-center gap-3"><svg class="w-12 h-12 text-neutral-light" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg><p class="text-lg font-medium">No account details available</p><p class="text-sm">The processed accounts data could not be found</p></div></td></tr>'
-      }
+                      )
+                      .join("")
+                  : '<tr><td colspan="4" class="px-6 py-12 text-center text-text-secondary"><div class="flex flex-col items-center gap-3"><svg class="w-12 h-12 text-neutral-light" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg><p class="text-lg font-medium">No account details available</p><p class="text-sm">The processed accounts data could not be found</p></div></td></tr>'
+              }
             </tbody>
           </table>
         </div>
@@ -1283,7 +1480,6 @@ async function editUser(email, clients, access) {
 
 // Show success message
 function showSuccess(message) {
-  // Create a temporary success message element
   const successDiv = document.createElement("div")
   successDiv.className =
     "fixed top-4 right-4 bg-green-50 border border-green-200 text-green-800 p-4 rounded-xl shadow-large z-50 animate-fade-in"
@@ -1406,11 +1602,9 @@ document.getElementById("refreshAuditButton").addEventListener("click", () => {
 })
 
 // Event listeners for DL Generator
-// Replace the existing modeSelect event listener with this updated version
 document.getElementById("modeSelect").addEventListener("change", async (e) => {
   const mode = e.target.value
   if (!mode) {
-    // FIXED: Don't reset everything when mode is cleared, just clear mode-specific sections
     document.getElementById("selectionSection").classList.add("hidden")
     document.getElementById("transmittalFolderSection").classList.add("hidden")
     document.getElementById("uploadSection").classList.add("hidden")
@@ -1435,7 +1629,6 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
     }
     const data = await response.json()
 
-    // FIXED: Don't reset UI completely, just clear mode-specific sections
     document.getElementById("selectionSection").classList.add("hidden")
     document.getElementById("transmittalFolderSection").classList.add("hidden")
     document.getElementById("uploadSection").classList.add("hidden")
@@ -1454,15 +1647,12 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
     }
 
     if (mode === "Transmittal Only") {
-      // For Transmittal Only mode, show folder selection first
       document.getElementById("transmittalFolderSection").classList.remove("hidden")
       await fetchFoldersForTransmittal()
     } else if (mode === "DL w/ Transmittal") {
-      // For DL w/ Transmittal, show the selection section first
       document.getElementById("selectionSection").classList.remove("hidden")
       await fetchFolders()
     } else {
-      // For DL Only mode
       document.getElementById("selectionSection").classList.remove("hidden")
       await fetchFolders()
     }
@@ -1472,7 +1662,6 @@ document.getElementById("modeSelect").addEventListener("change", async (e) => {
   }
 })
 
-// Add new function to fetch folders for transmittal folder selection
 async function fetchFoldersForTransmittal() {
   try {
     const response = await fetch(`${API_BASE}/folders`, {
@@ -1500,11 +1689,9 @@ async function fetchFoldersForTransmittal() {
   }
 }
 
-// Add event listener for transmittal folder selection
 document.getElementById("transmittalFolderSelect").addEventListener("change", async (e) => {
   const folder = e.target.value
   if (folder) {
-    // Fetch transmittal placeholders with the selected folder
     try {
       const response = await fetch(`${API_BASE}/transmittal_placeholders?folder=${encodeURIComponent(folder)}`, {
         method: "GET",
@@ -1524,7 +1711,6 @@ document.getElementById("transmittalFolderSelect").addEventListener("change", as
       if (data.message) {
         placeholdersList.innerHTML = ""
         const placeholders = data.placeholders || []
-        // Filter out placeholders starting with "IMAGE_" and clean «»
         const filteredPlaceholders = placeholders
           .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
           .map((placeholder) => placeholder.replace(/«|»/g, ""))
@@ -1554,17 +1740,14 @@ document.getElementById("transmittalFolderSelect").addEventListener("change", as
       showError("Failed to fetch transmittal placeholders. Please check template configuration.")
     }
   } else {
-    // Hide placeholders and upload sections if no folder is selected
     document.getElementById("placeholdersDisplay").classList.add("hidden")
     document.getElementById("uploadSection").classList.add("hidden")
   }
 })
 
-// FIXED: Output Format Selection - preserve selection and don't reset when mode changes
 document.getElementById("outputFormatSelect").addEventListener("change", async (e) => {
   const format = e.target.value
   if (!format) {
-    // Hide mode selection if no format is selected
     document.querySelector(".card:has(#modeSelect)").classList.add("hidden")
     return
   }
@@ -1586,10 +1769,8 @@ document.getElementById("outputFormatSelect").addEventListener("change", async (
       throw new Error(errorData.detail || "Failed to set output format")
     }
 
-    // Show mode selection after output format is selected
     document.querySelector(".card:has(#modeSelect)").classList.remove("hidden")
 
-    // Update UI based on selected format
     if (format === "print") {
       document.getElementById("printFormatInfo").classList.remove("hidden")
       document.getElementById("zipFormatInfo").classList.add("hidden")
@@ -1614,81 +1795,6 @@ document.getElementById("dlTypeSelect").addEventListener("change", (e) => {
   }
 })
 
-// document.getElementById("templateSelect").addEventListener("change", (e) => {
-//   if (e.target.value) {
-//     fetchPlaceholders(
-//       document.getElementById("folderSelect").value,
-//       document.getElementById("dlTypeSelect").value,
-//       e.target.value,
-//     )
-//   }
-// })
-
-// Replace the existing modeSelect event listener with this updated version
-// document.getElementById("modeSelect").addEventListener("change", async (e) => {
-//   const mode = e.target.value
-//   if (!mode) {
-//     // FIXED: Don't reset everything when mode is cleared, just clear mode-specific sections
-//     document.getElementById("selectionSection").classList.add("hidden")
-//     document.getElementById("uploadSection").classList.add("hidden")
-//     document.getElementById("statusDisplay").classList.add("hidden")
-//     document.getElementById("placeholdersDisplay").classList.add("hidden")
-//     return
-//   }
-//   try {
-//     const response = await fetch(`${API_BASE}/set_mode`, {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({ mode }),
-//       credentials: "include",
-//     })
-//     if (!response.ok) {
-//       if (response.status === 401) {
-//         redirectToLogin()
-//         return
-//       }
-//       const errorData = await response.json()
-//       throw new Error(errorData.detail || "Failed to set mode")
-//     }
-//     const data = await response.json()
-
-//     // FIXED: Don't reset UI completely, just clear mode-specific sections
-//     document.getElementById("selectionSection").classList.add("hidden")
-//     document.getElementById("uploadSection").classList.add("hidden")
-//     document.getElementById("placeholdersDisplay").classList.add("hidden")
-//     document.getElementById("dataPreview").classList.add("hidden")
-//     clearResultSection()
-
-//     // Keep the mode selection
-//     document.getElementById("modeSelect").value = mode
-
-//     if (data.template_status?.transmittal_template) {
-//       document.getElementById("templateStatusText").textContent = data.template_status.transmittal_template
-//       document.getElementById("statusDisplay").classList.remove("hidden")
-//     } else {
-//       document.getElementById("statusDisplay").classList.add("hidden")
-//     }
-
-//     if (mode === "Transmittal Only") {
-//       // For Transmittal Only mode, fetch transmittal placeholders directly
-//       await fetchTransmittalPlaceholders()
-//       document.getElementById("uploadSection").classList.remove("hidden")
-//     } else if (mode === "DL w/ Transmittal") {
-//       // For DL w/ Transmittal, show the selection section first
-//       document.getElementById("selectionSection").classList.remove("hidden")
-//       await fetchFolders()
-//     } else {
-//       // For DL Only mode
-//       document.getElementById("selectionSection").classList.remove("hidden")
-//       await fetchFolders()
-//     }
-//   } catch (error) {
-//     showError("Failed to set mode. Please check if the backend server is running.")
-//     document.getElementById("modeSelect").value = ""
-//   }
-// })
-
-// Update the template selection handler to fetch transmittal placeholders when in DL w/ Transmittal mode
 document.getElementById("templateSelect").addEventListener("change", async (e) => {
   if (e.target.value) {
     const mode = document.getElementById("modeSelect").value
@@ -1696,10 +1802,8 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
     const dlType = document.getElementById("dlTypeSelect").value
     const template = e.target.value
 
-    // First fetch regular template placeholders
     await fetchPlaceholders(folder, dlType, template)
 
-    // If in DL w/ Transmittal mode, also fetch transmittal placeholders and combine them
     if (mode === "DL w/ Transmittal") {
       document.getElementById("placeholdersLoadingOverlay").classList.remove("hidden")
       try {
@@ -1712,7 +1816,6 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
           const data = await response.json()
           const placeholdersList = document.getElementById("placeholdersList")
 
-          // Add a separator for transmittal placeholders
           const separator = document.createElement("li")
           separator.className = "py-2 border-t border-border-light mt-2 pt-2"
           separator.innerHTML = `
@@ -1723,7 +1826,6 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
           `
           placeholdersList.appendChild(separator)
 
-          // Add transmittal placeholders
           const transmittalPlaceholders = data.placeholders || []
           const filteredTransmittalPlaceholders = transmittalPlaceholders
             .filter((placeholder) => !placeholder.startsWith("«IMAGE_"))
@@ -1749,7 +1851,6 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
       } catch (error) {
         console.error("Error fetching transmittal placeholders:", error)
       } finally {
-        // Hide loading overlay
         document.getElementById("placeholdersLoadingOverlay").classList.add("hidden")
       }
     }
@@ -1766,22 +1867,20 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
       const response = await fetch(`${API_BASE}/upload_excel`, {
         method: "POST",
         body: formData,
-        credentials: "include", // Added credentials
+        credentials: "include",
       })
       const data = await response.json()
       document.getElementById("excelLoadingOverlay").classList.add("hidden")
 
       if (!response.ok) {
         showError(data.detail || "An error occurred while uploading the Excel file.")
-        document.getElementById("excelUpload").value = "" // Clear file input
+        document.getElementById("excelUpload").value = ""
         return
       }
-      // ... rest of the success logic for displaying table ...
+
       const tableContainer = document.getElementById("dataTable")
-      // (Existing table rendering logic)
-      // Ensure data.data exists and is an array
       if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
-        tableContainer.innerHTML = "" // Clear previous preview
+        tableContainer.innerHTML = ""
         tableContainer.className = "max-h-[500px] overflow-auto rounded-lg border border-border-light"
 
         const table = document.createElement("table")
@@ -1822,11 +1921,12 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
       document.getElementById("excelLoadingOverlay").classList.add("hidden")
       console.error("Excel upload error:", error)
       showError(`Failed to upload Excel file: ${error.message}. Please check file format and network connection.`)
-      document.getElementById("excelUpload").value = "" // Clear file input
+      document.getElementById("excelUpload").value = ""
     }
   }
 })
 
+// Enhanced generate button with improved progress handling
 document.getElementById("generateButton").addEventListener("click", async () => {
   const file = document.getElementById("excelUpload").files[0]
   if (!file) {
@@ -1834,7 +1934,6 @@ document.getElementById("generateButton").addEventListener("click", async () => 
     return
   }
 
-  // Set processing state and disable inputs
   isProcessing = true
   toggleInputFields(true)
 
@@ -1845,10 +1944,10 @@ document.getElementById("generateButton").addEventListener("click", async () => 
   const resultSection = document.getElementById("resultSection")
   const downloadButton = document.getElementById("downloadButton")
   const cleanupButton = document.getElementById("cleanupButton")
-  progressBar.style.width = "0%"
-  progressText.textContent = "Starting processing..."
 
-  // FIXED: Clear result section before starting new processing
+  progressBar.style.width = "0%"
+  progressText.innerHTML = '<span class="text-blue-600">🚀</span> Starting processing...'
+
   clearResultSection()
 
   const formData = new FormData()
@@ -1870,7 +1969,9 @@ document.getElementById("generateButton").addEventListener("click", async () => 
       }),
       timeoutPromise,
     ])
+
     clearTimeout(timeoutId)
+
     if (!response.ok) {
       if (response.status === 401) {
         redirectToLogin()
@@ -1879,25 +1980,29 @@ document.getElementById("generateButton").addEventListener("click", async () => 
       const errorData = await response.json()
       throw new Error(errorData.detail || "Server error")
     }
+
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
-    let lastUpdate = Date.now()
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
+
       try {
         const chunk = decoder.decode(value, { stream: true })
         const jsonObjects = chunk.split("\n").filter((line) => line.trim())
+
         for (const jsonStr of jsonObjects) {
           try {
             const data = JSON.parse(jsonStr)
+
             if (data.error) {
               showError(data.error)
               return
             }
-            progressBar.style.width = `${data.progress}%`
-            progressText.textContent = data.message
-            lastUpdate = Date.now()
+
+            // Use enhanced progress display
+            updateProgressDisplay(data)
 
             if (data.download_ready) {
               resultSection.classList.remove("hidden")
@@ -1908,26 +2013,7 @@ document.getElementById("generateButton").addEventListener("click", async () => 
               }
             }
 
-            // Load available printers
-            async function loadAvailablePrinters() {
-              try {
-                const response = await fetch(`${API_BASE}/printers`, {
-                  credentials: "include",
-                })
-                if (response.ok) {
-                  const data = await response.json()
-                  return data.printers
-                } else {
-                  console.error("Failed to load printers:", response.status)
-                  return []
-                }
-              } catch (error) {
-                console.error("Failed to load printers:", error)
-                return []
-              }
-            }
-
-            // Handle print-ready response (replace the existing print-ready handling)
+            // Handle print-ready response with enhanced UI
             if (data.print_ready) {
               resultSection.classList.remove("hidden")
               cleanupButton.classList.remove("hidden")
@@ -1935,130 +2021,8 @@ document.getElementById("generateButton").addEventListener("click", async () => 
               // Load available printers
               const printers = await loadAvailablePrinters()
 
-              // Create area selection for printing
-              const printAreaSelect = document.createElement("select")
-              printAreaSelect.id = "printAreaSelect"
-              printAreaSelect.className = "p-2 border border-border-medium rounded-lg mr-2"
-
-              // Add options for each area
-              printAreaSelect.innerHTML = '<option value="">Select area to print</option>'
-              data.areas.forEach((area) => {
-                const option = document.createElement("option")
-                option.value = area
-                option.textContent = area
-                printAreaSelect.appendChild(option)
-              })
-
-              // Create printer selection dropdown
-              const printerSelect = document.createElement("select")
-              printerSelect.id = "printerSelect"
-              printerSelect.className = "p-2 border border-border-medium rounded-lg mr-2"
-
-              // Add printer options
-              printerSelect.innerHTML = '<option value="">Default Printer</option>'
-              printers.forEach((printer) => {
-                const option = document.createElement("option")
-                option.value = printer.name
-                option.textContent = printer.name + (printer.is_default ? " (Default)" : "")
-                if (printer.is_default) {
-                  option.selected = true
-                }
-                printerSelect.appendChild(option)
-              })
-
-              // Create print button
-              const printButton = document.createElement("button")
-              printButton.id = "printButton"
-              printButton.className =
-                "btn bg-primary hover:bg-primary-dark text-white py-2 px-4 rounded-lg font-medium flex items-center gap-2"
-              printButton.innerHTML = `
-    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
-    </svg>
-    Print Selected Area
-  `
-
-              // Add event listener for print button
-              printButton.addEventListener("click", async () => {
-                const selectedArea = printAreaSelect.value
-                const selectedPrinter = printerSelect.value
-
-                if (!selectedArea) {
-                  showError("Please select an area to print")
-                  return
-                }
-
-                try {
-                  printButton.disabled = true
-                  printButton.innerHTML = `
-        <div class="loading-spinner-sm"></div>
-        Printing...
-      `
-
-                  // Build URL with printer parameter if selected
-                  let printUrl = `${API_BASE}/print_files/${selectedArea}`
-                  if (selectedPrinter) {
-                    printUrl += `?printer=${encodeURIComponent(selectedPrinter)}`
-                  }
-
-                  const response = await fetch(printUrl, {
-                    credentials: "include",
-                  })
-
-                  if (!response.ok) {
-                    const errorData = await response.json()
-                    throw new Error(errorData.detail || "Failed to print files")
-                  }
-
-                  const result = await response.json()
-                  showSuccess(result.message)
-                } catch (error) {
-                  showError(`Failed to print: ${error.message}`)
-                } finally {
-                  printButton.disabled = false
-                  printButton.innerHTML = `
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
-        </svg>
-        Print Selected Area
-      `
-                }
-              })
-
-              // Add to result section with improved layout
-              const printContainer = document.createElement("div")
-              printContainer.className = "mt-4 space-y-3"
-
-              // Create labels and controls
-              const areaLabel = document.createElement("label")
-              areaLabel.className = "block text-sm font-medium text-text-secondary"
-              areaLabel.textContent = "Select Area:"
-
-              const printerLabel = document.createElement("label")
-              printerLabel.className = "block text-sm font-medium text-text-secondary"
-              printerLabel.textContent = "Select Printer:"
-
-              const controlsContainer = document.createElement("div")
-              controlsContainer.className = "flex flex-col sm:flex-row gap-3 items-start sm:items-end"
-
-              const areaContainer = document.createElement("div")
-              areaContainer.className = "flex-1"
-              areaContainer.appendChild(areaLabel)
-              areaContainer.appendChild(printAreaSelect)
-
-              const printerContainer = document.createElement("div")
-              printerContainer.className = "flex-1"
-              printerContainer.appendChild(printerLabel)
-              printerContainer.appendChild(printerSelect)
-
-              const buttonContainer = document.createElement("div")
-              buttonContainer.appendChild(printButton)
-
-              controlsContainer.appendChild(areaContainer)
-              controlsContainer.appendChild(printerContainer)
-              controlsContainer.appendChild(buttonContainer)
-
-              printContainer.appendChild(controlsContainer)
+              // Create enhanced print controls
+              const printContainer = createPrintControls(data.areas, printers)
               resultSection.appendChild(printContainer)
             }
           } catch (jsonError) {
@@ -2072,15 +2036,142 @@ document.getElementById("generateButton").addEventListener("click", async () => 
   } catch (error) {
     clearTimeout(timeoutId)
     showError(`Failed to generate PDFs: ${error.message}`)
-    progressText.textContent = "Processing failed."
+    progressText.innerHTML = '<span class="text-red-600">❌</span> Processing failed.'
     progressBar.style.width = "0%"
   } finally {
-    // Re-enable inputs when processing is complete
     isProcessing = false
     toggleInputFields(false)
   }
 })
 
+async function loadAvailablePrinters() {
+  try {
+    const response = await fetch(`${API_BASE}/printers`, {
+      credentials: "include",
+    })
+    if (response.ok) {
+      const data = await response.json()
+      return data.printers
+    } else {
+      console.error("Failed to load printers:", response.status)
+      return []
+    }
+  } catch (error) {
+    console.error("Failed to load printers:", error)
+    return []
+  }
+}
+
+function createPrintControls(areas, printers) {
+  const printContainer = document.createElement("div")
+  printContainer.className = "mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200"
+
+  printContainer.innerHTML = `
+    <h4 class="text-lg font-semibold text-gray-800 mb-4">🖨️ Print Documents</h4>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-600 mb-2">Select Area</label>
+        <select id="printAreaSelect" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <option value="">Choose area to print</option>
+          ${areas.map((area) => `<option value="${area}">${area}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-600 mb-2">Select Printer</label>
+        <select id="printerSelect" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <option value="">Default Printer</option>
+          ${printers
+            .map(
+              (printer) => `
+            <option value="${printer.name}" ${printer.is_default ? "selected" : ""}>
+              ${printer.name}${printer.is_default ? " (Default)" : ""}
+            </option>
+          `,
+            )
+            .join("")}
+        </select>
+      </div>
+      <div class="flex items-end">
+        <button id="printButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+          </svg>
+          Print Selected Area
+        </button>
+      </div>
+    </div>
+    <div id="printStatus" class="hidden mt-3 p-3 rounded-lg"></div>
+  `
+
+  // Add print functionality
+  const printButton = printContainer.querySelector("#printButton")
+  const printAreaSelect = printContainer.querySelector("#printAreaSelect")
+  const printerSelect = printContainer.querySelector("#printerSelect")
+  const printStatus = printContainer.querySelector("#printStatus")
+
+  printButton.addEventListener("click", async () => {
+    const selectedArea = printAreaSelect.value
+    const selectedPrinter = printerSelect.value
+
+    if (!selectedArea) {
+      showPrintStatus("Please select an area to print", "error")
+      return
+    }
+
+    try {
+      printButton.disabled = true
+      printButton.innerHTML = `
+        <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+        Printing...
+      `
+
+      let printUrl = `${API_BASE}/print_files/${selectedArea}`
+      if (selectedPrinter) {
+        printUrl += `?printer=${encodeURIComponent(selectedPrinter)}`
+      }
+
+      const response = await fetch(printUrl, {
+        credentials: "include",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || "Failed to print files")
+      }
+
+      const result = await response.json()
+      showPrintStatus(result.message, "success")
+    } catch (error) {
+      showPrintStatus(`Failed to print: ${error.message}`, "error")
+    } finally {
+      printButton.disabled = false
+      printButton.innerHTML = `
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+        </svg>
+        Print Selected Area
+      `
+    }
+  })
+
+  function showPrintStatus(message, type) {
+    const bgColor =
+      type === "success" ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-800"
+    const icon = type === "success" ? "✅" : "❌"
+
+    printStatus.className = `mt-3 p-3 rounded-lg border ${bgColor}`
+    printStatus.innerHTML = `${icon} ${message}`
+    printStatus.classList.remove("hidden")
+
+    setTimeout(() => {
+      printStatus.classList.add("hidden")
+    }, 5000)
+  }
+
+  return printContainer
+}
+
+// Cleanup button handler
 document.getElementById("cleanupButton").addEventListener("click", async () => {
   try {
     const response = await fetch(`${API_BASE}/cleanup`, {
@@ -2138,13 +2229,14 @@ async function updateUserTable() {
     }
 
     const users = await response.json()
-    tbody.innerHTML = "" // Clear loading state and prior content
+    const userTableBody = document.getElementById("userTableBody")
+    userTableBody.innerHTML = "" // Clear loading state and prior content
 
     // Update stats
     updateUserStats(users)
 
     if (users.length === 0) {
-      tbody.innerHTML = `
+      userTableBody.innerHTML = `
                 <tr>
                     <td colspan="4" class="px-8 py-16 text-center text-gray-500">
                         <div class="flex flex-col items-center gap-4">
@@ -2189,24 +2281,26 @@ async function updateUserTable() {
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex flex-wrap gap-1">
-                        ${Array.isArray(user.clients)
-          ? user.clients
-            .map(
-              (client) =>
-                `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
-            )
-            .join("")
-          : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
-        }
+                        ${
+                          Array.isArray(user.clients)
+                            ? user.clients
+                                .map(
+                                  (client) =>
+                                    `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
+                                )
+                                .join("")
+                            : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
+                        }
                     </div>
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex items-center gap-2">
                         <div class="w-3 h-3 rounded-full ${user.access === "admin" ? "bg-green-400" : "bg-blue-400"}"></div>
-                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${user.access === "admin"
-          ? "bg-green-100 text-green-800 border border-green-200"
-          : "bg-gray-100 text-gray-800 border border-gray-200"
-        }">
+                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${
+                          user.access === "admin"
+                            ? "bg-green-100 text-green-800 border border-green-200"
+                            : "bg-gray-100 text-gray-800 border border-gray-200"
+                        }">
                             ${user.access === "admin" ? "Administrator" : "User"}
                         </span>
                     </div>
@@ -2232,14 +2326,14 @@ async function updateUserTable() {
                     </div>
                 </td>
             `
-      tbody.appendChild(row)
+      userTableBody.appendChild(row)
     })
 
     // Setup search and filter functionality
     setupUserFilters(users)
   } catch (error) {
-    tbody = document.getElementById("userTableBody")
-    tbody.innerHTML = `
+    userTableBody = document.getElementById("userTableBody")
+    userTableBody.innerHTML = `
             <tr>
                 <td colspan="4" class="px-8 py-12 text-center text-red-500">
                     <div class="flex flex-col items-center gap-3">
@@ -2290,11 +2384,11 @@ function setupUserFilters(allUsers) {
   }
 
   function renderFilteredUsers(users) {
-    const tbody = document.getElementById("userTableBody")
-    tbody.innerHTML = ""
+    const userTableBody = document.getElementById("userTableBody")
+    userTableBody.innerHTML = ""
 
     if (users.length === 0) {
-      tbody.innerHTML = `
+      userTableBody.innerHTML = `
                 <tr>
                     <td colspan="4" class="px-8 py-12 text-center text-gray-500">
                         <div class="flex flex-col items-center gap-3">
@@ -2327,24 +2421,26 @@ function setupUserFilters(allUsers) {
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex flex-wrap gap-1">
-                        ${Array.isArray(user.clients)
-          ? user.clients
-            .map(
-              (client) =>
-                `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
-            )
-            .join("")
-          : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
-        }
+                        ${
+                          Array.isArray(user.clients)
+                            ? user.clients
+                                .map(
+                                  (client) =>
+                                    `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
+                                )
+                                .join("")
+                            : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
+                        }
                     </div>
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex items-center gap-2">
                         <div class="w-3 h-3 rounded-full ${user.access === "admin" ? "bg-green-400" : "bg-blue-400"}"></div>
-                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${user.access === "admin"
-          ? "bg-green-100 text-green-800 border border-green-200"
-          : "bg-gray-100 text-gray-800 border border-gray-200"
-        }">
+                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${
+                          user.access === "admin"
+                            ? "bg-green-100 text-green-800 border border-green-200"
+                            : "bg-gray-100 text-gray-800 border border-gray-200"
+                        }">
                             ${user.access === "admin" ? "Administrator" : "Standard User"}
                         </span>
                     </div>
@@ -2370,7 +2466,7 @@ function setupUserFilters(allUsers) {
                     </div>
                 </td>
             `
-      tbody.appendChild(row)
+      userTableBody.appendChild(row)
     })
   }
 
