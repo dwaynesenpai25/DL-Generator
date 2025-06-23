@@ -12,6 +12,11 @@
 </head>
 
 <body class="bg-background min-h-screen font-sans antialiased text-text-primary">
+    <!-- General Error Container for toast-like messages -->
+    <div id="generalErrorContainer" class="fixed top-4 right-4 p-4 z-[100]">
+        <!-- Errors will be injected here by showError function -->
+    </div>
+
     <!-- Login Modal -->
     <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
         <div class="glass-effect p-8 rounded-2xl shadow-large w-full max-w-md transform animate-fade-in">
@@ -105,7 +110,7 @@
                 <!-- User Info -->
                 <div class="p-4 border-t border-white border-opacity-20">
                     <div class="flex items-center gap-3 mb-3">
-                        <img id="userAvatar" src="/placeholder.svg" alt="User Avatar"
+                        <img id="userAvatar" src="/placeholder.svg?width=32&height=32" alt="User Avatar"
                             class="w-8 h-8 rounded-full border-2 border-white border-opacity-20 hidden">
                         <div id="userAvatarFallback"
                             class="w-8 h-8 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
@@ -280,8 +285,10 @@
                     <div id="transmittalFolderSection" class="hidden">
                         <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6">
                             <div class="flex items-center gap-3 mb-4">
-                                <div class="w-10 h-10 bg-green-500 bg-opacity-10 rounded-lg flex items-center justify-center">
-                                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <div
+                                    class="w-10 h-10 bg-green-500 bg-opacity-10 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4">
                                         </path>
@@ -289,7 +296,8 @@
                                 </div>
                                 <div>
                                     <h3 class="text-lg font-semibold text-text-primary">Client Selection</h3>
-                                    <p class="text-sm text-text-secondary">Select the client folder for audit tracking</p>
+                                    <p class="text-sm text-text-secondary">Select the client folder for audit tracking
+                                    </p>
                                 </div>
                             </div>
                             <select id="transmittalFolderSelect"
@@ -330,10 +338,21 @@
                             </div>
                         </div>
                     </div>
-
+        <div id="placeholdersLoadingOverlay"
+                            class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-100">
+                            <div class="glass-effect p-8 rounded-2xl shadow-large flex items-center gap-4">
+                                <div class="loading-spinner"></div>
+                                <div>
+                                    <p class="text-text-primary font-semibold text-lg">Loading Placeholders</p>
+                                    <p class="text-text-secondary text-sm">Please wait while we fetch the
+                                        placeholders...</p>
+                                </div>
+                            </div>
+                        </div>
 
                     <!-- Placeholders Display -->
                     <div id="placeholdersDisplay" class="hidden">
+                
                         <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6">
                             <div class="flex items-center gap-3 mb-4">
                                 <div
@@ -352,14 +371,16 @@
                             <div class="bg-background rounded-lg p-4 max-h-40 overflow-y-auto">
                                 <ul id="placeholdersList" class="space-y-2"></ul>
                             </div>
+
                         </div>
                     </div>
 
                     <!-- File Upload Section -->
                     <div id="uploadSection" class="hidden">
                         <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6 relative">
-                            <!-- Loading Overlay for Excel Upload -->
+                            <!-- Error message specific to upload/generation -->
                             <div id="errorMessage" class="hidden mb-4">
+                                <!-- This is the one targeted by showError in progress section -->
                                 <div class="bg-red-50 border border-red-200 rounded-xl p-4 animate-fade-in">
                                     <div class="flex items-center gap-3">
                                         <div class="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
@@ -466,25 +487,6 @@
                                 <div id="progressBar"
                                     class="progress-bar bg-gradient-to-r from-primary to-secondary h-full rounded-full"
                                     style="width: 0%"></div>
-                            </div>
-
-                            <!-- Error Message -->
-                            <div id="errorMessage" class="hidden">
-                                <div class="bg-red-50 border border-red-200 rounded-xl p-4 animate-fade-in">
-                                    <div class="flex items-center gap-3">
-                                        <div class="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                                            <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor"
-                                                viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p class="font-medium text-red-900">Error</p>
-                                            <p class="text-sm text-red-700"><span id="errorText"></span></p>
-                                        </div>
-                                    </div>
-                                </div>
                             </div>
 
                             <!-- Result Section -->
@@ -770,7 +772,7 @@
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
                                                         stroke-width="2"
-                                                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 2 0 01-2-2z">
+                                                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
                                                     </path>
                                                 </svg>
                                                 Total Accounts

@@ -103,7 +103,7 @@ async function checkSession() {
       method: "GET",
       credentials: "include",
     })
-    console.log("sample",response)
+    console.log("sample", response)
     if (response.ok) {
       const data = await response.json()
       console.log(data)
@@ -178,37 +178,37 @@ function updateNavigationAccess() {
 let isProcessingCallback = false;
 
 async function handleLarkCallback(code) {
-    if (isProcessingCallback) {
-        console.log("Already processing callback, ignoring duplicate");
-        return;
+  if (isProcessingCallback) {
+    console.log("Already processing callback, ignoring duplicate");
+    return;
+  }
+  isProcessingCallback = true;
+  console.log(`Handling Lark callback with code: ${code}`);
+  try {
+    const response = await fetch(`${API_BASE}/lark_callback?code=${code}`, {
+      method: "GET",
+      credentials: "include",
+    });
+    const data = await response.json();
+    console.log("Lark callback response:", data);
+    if (data.success) {
+      currentUser = { username: data.username, role: data.role };
+      document.getElementById("loginModal").classList.add("hidden");
+      document.getElementById("mainContent").classList.remove("hidden");
+      document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`;
+      window.history.replaceState({}, document.title, "/");
+      await checkSession();
+    } else {
+      document.getElementById("loginError").classList.remove("hidden");
+      document.getElementById("loginError").textContent = data.detail || "Authentication failed.";
     }
-    isProcessingCallback = true;
-    console.log(`Handling Lark callback with code: ${code}`);
-    try {
-        const response = await fetch(`${API_BASE}/lark_callback?code=${code}`, {
-            method: "GET",
-            credentials: "include",
-        });
-        const data = await response.json();
-        console.log("Lark callback response:", data);
-        if (data.success) {
-            currentUser = { username: data.username, role: data.role };
-            document.getElementById("loginModal").classList.add("hidden");
-            document.getElementById("mainContent").classList.remove("hidden");
-            document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`;
-            window.history.replaceState({}, document.title, "/");
-            await checkSession();
-        } else {
-            document.getElementById("loginError").classList.remove("hidden");
-            document.getElementById("loginError").textContent = data.detail || "Authentication failed.";
-        }
-    } catch (error) {
-        console.error("Error in handleLarkCallback:", error);
-        document.getElementById("loginError").classList.remove("hidden");
-        document.getElementById("loginError").textContent = "Authentication failed. Please try again.";
-    } finally {
-        isProcessingCallback = false;
-    }
+  } catch (error) {
+    console.error("Error in handleLarkCallback:", error);
+    document.getElementById("loginError").classList.remove("hidden");
+    document.getElementById("loginError").textContent = "Authentication failed. Please try again.";
+  } finally {
+    isProcessingCallback = false;
+  }
 }
 // Initiate Lark login
 document.getElementById("loginButton").addEventListener("click", () => {
@@ -362,21 +362,60 @@ function clearResultSection() {
 }
 
 // Show error
-function showError(message) {
-  const errorDiv = document.getElementById("errorMessage");
-  if (!errorDiv) {
-    console.error("Error: #errorMessage div not found in the DOM");
-    return;
+function showError(message, isCritical = false) {
+  const errorDiv = document.getElementById("errorMessage") // This is the progress section's error
+  const generalErrorContainer = document.getElementById("generalErrorContainer") // A new general error display
+
+  let displayMessage = message || "An unexpected error occurred. Please try again."
+  if (typeof message === "object" && message !== null) {
+    // Handle cases where message might be an error object or complex response
+    if (message.detail) displayMessage = message.detail
+    else if (message.message) displayMessage = message.message
+    else displayMessage = JSON.stringify(message)
   }
 
-  const errorSpan = errorDiv.querySelector("span");
-  if (!errorSpan) {
-    console.error("Error: <span> element not found inside #errorMessage");
-    return;
+  // Option 1: Use the existing error display in the progress section
+  if (errorDiv && errorDiv.offsetParent !== null) {
+    // Check if progressSection is visible
+    const errorTextSpan = errorDiv.querySelector("#errorText") // Assuming #errorText is the span inside #errorMessage
+    if (errorTextSpan) {
+      errorTextSpan.textContent = displayMessage
+      errorDiv.classList.remove("hidden")
+    } else {
+      // Fallback if structure is different
+      errorDiv.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 animate-fade-in">...${displayMessage}</div>`
+      errorDiv.classList.remove("hidden")
+    }
+  }
+  // Option 2: Use a more general, perhaps toast-like notification (if generalErrorContainer exists)
+  else if (generalErrorContainer) {
+    generalErrorContainer.innerHTML = `
+      <div class="fixed top-4 right-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md shadow-lg z-50 animate-fade-in" role="alert">
+        <div class="flex">
+          <div class="py-1"><svg class="fill-current h-6 w-6 text-red-500 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM11.414 10l2.829-2.828-1.415-1.415L10 8.586 7.172 5.757 5.757 7.172 8.586 10l-2.829 2.828 1.415 1.415L10 11.414l2.828 2.829 1.415-1.415L11.414 10z"/></svg></div>
+          <div>
+            <p class="font-bold">Error</p>
+            <p class="text-sm">${displayMessage}</p>
+          </div>
+        </div>
+      </div>
+    `
+    generalErrorContainer.classList.remove("hidden")
+    setTimeout(() => {
+      generalErrorContainer.classList.add("hidden")
+      generalErrorContainer.innerHTML = "" // Clear content
+    }, 5000) // Hide after 5 seconds
+  }
+  // Fallback to console if no UI element found
+  else {
+    console.error("Error display UI element not found. Raw error:", displayMessage)
   }
 
-  errorSpan.textContent = message || "An unexpected error occurred.";
-  errorDiv.classList.remove("hidden");
+  if (isCritical) {
+    // Potentially disable parts of the UI or guide user
+    console.warn("A critical error occurred:", displayMessage)
+    toggleInputFields(true) // Example: disable inputs on critical error
+  }
 }
 // Show template combined alert
 function showTemplateCombinedAlert() {
@@ -386,16 +425,17 @@ function showTemplateCombinedAlert() {
 // Fetch folders (now user-specific)
 async function fetchFolders() {
   try {
-    const response = await fetch(`${API_BASE}/folders`, {
-      credentials: "include",
-    })
+    const response = await fetch(`${API_BASE}/folders`, { credentials: "include" })
     if (!response.ok) {
       if (response.status === 401) {
-        redirectToLogin()
+        redirectToLogin() // This already handles UI reset
         return
       }
-      const errorData = await response.json()
-      throw new Error(errorData.detail || "Failed to fetch folders")
+      console.log("1", response)
+      const errorData = await response
+        .json()
+        .catch(() => ({ detail: "Failed to fetch folders and parse error response." }))
+      throw new Error(errorData.detail || `HTTP error ${response.status}`)
     }
     const folders = await response.json()
     const folderSelect = document.getElementById("folderSelect")
@@ -407,12 +447,12 @@ async function fetchFolders() {
       folderSelect.appendChild(option)
     })
 
-    // Always load template folders for modal if user is admin
-    if (currentUser && currentUser.access === "admin") {
+    if (currentUser && currentUser.access === "admin1") {
       await loadTemplateFoldersForModal()
     }
   } catch (error) {
-    showError("Failed to fetch folders. Please check FTP configuration.")
+    console.error("fetchFolders error:", error)
+    showError(`Failed to fetch folders: ${error.message}. Please check FTP configuration or server status.`)
   }
 }
 
@@ -464,20 +504,27 @@ async function fetchDLTypes(folder) {
         showError("Access denied to this template folder.")
         return
       }
-      const errorData = await response.json()
-      throw new Error(errorData.detail || "Failed to fetch DL types")
+      const errorData = await response
+        .json()
+        .catch(() => ({ detail: "Failed to fetch DL types and parse error response." }))
+      throw new Error(errorData.detail || `HTTP error ${response.status}`)
     }
     const dlTypes = await response.json()
     const dlTypeSelect = document.getElementById("dlTypeSelect")
     dlTypeSelect.innerHTML = '<option value="">Select DL Type</option>'
-    dlTypes.forEach((type) => {
-      const option = document.createElement("option")
-      option.value = type
-      option.textContent = type
-      dlTypeSelect.appendChild(option)
-    })
+    if (dlTypes && dlTypes.length > 0) {
+      dlTypes.forEach((type) => {
+        const option = document.createElement("option")
+        option.value = type
+        option.textContent = type
+        dlTypeSelect.appendChild(option)
+      })
+    } else {
+      showError(`No DL types found for folder "${folder}". Check Google Sheets configuration.`)
+    }
   } catch (error) {
-    showError("Failed to fetch DL types. Please check Google Sheets configuration.")
+    console.error("fetchDLTypes error:", error)
+    showError(`Failed to fetch DL types for "${folder}": ${error.message}.`)
   }
 }
 
@@ -522,6 +569,7 @@ async function fetchTemplates(folder) {
 
 // Fetch placeholders
 async function fetchPlaceholders(folder, dl_type, template) {
+  document.getElementById("placeholdersLoadingOverlay").classList.remove("hidden")
   try {
     const response = await fetch(`${API_BASE}/placeholders`, {
       method: "POST",
@@ -580,10 +628,14 @@ async function fetchPlaceholders(folder, dl_type, template) {
   } catch (error) {
     console.error("Error processing placeholders:", error);
     showError("Failed to fetch placeholders. Please check template configuration.");
+  } finally {
+    // Hide loading overlay
+    document.getElementById("placeholdersLoadingOverlay").classList.add("hidden")
   }
 }
 
 async function fetchTransmittalPlaceholders() {
+  document.getElementById("placeholdersLoadingOverlay").classList.remove("hidden")
   try {
     const response = await fetch(`${API_BASE}/transmittal_placeholders`, {
       method: "GET",
@@ -631,6 +683,9 @@ async function fetchTransmittalPlaceholders() {
   } catch (error) {
     console.error("Error processing transmittal placeholders:", error)
     showError("Failed to fetch transmittal placeholders. Please check template configuration.")
+  } finally {
+    // Hide loading overlay
+    document.getElementById("placeholdersLoadingOverlay").classList.add("hidden")
   }
 }
 
@@ -1001,11 +1056,10 @@ async function showAuditDetails(auditId, page = 1) {
               </tr>
             </thead>
             <tbody id="accountDetailsList" class="divide-y divide-border-light">
-              ${
-                details.accounts.length > 0
-                  ? details.accounts
-                      .map(
-                        (account, index) => `
+              ${details.accounts.length > 0
+        ? details.accounts
+          .map(
+            (account, index) => `
                   <tr class="hover:bg-surface-hover transition-colors ${index % 2 === 0 ? "bg-gray-50" : "bg-white"}">
                     <td class="px-6 py-4">
                       <div class="flex items-center gap-3">
@@ -1030,10 +1084,10 @@ async function showAuditDetails(auditId, page = 1) {
                     </td>
                   </tr>
                 `,
-                      )
-                      .join("")
-                  : '<tr><td colspan="4" class="px-6 py-12 text-center text-text-secondary"><div class="flex flex-col items-center gap-3"><svg class="w-12 h-12 text-neutral-light" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg><p class="text-lg font-medium">No account details available</p><p class="text-sm">The processed accounts data could not be found</p></div></td></tr>'
-              }
+          )
+          .join("")
+        : '<tr><td colspan="4" class="px-6 py-12 text-center text-text-secondary"><div class="flex flex-col items-center gap-3"><svg class="w-12 h-12 text-neutral-light" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg><p class="text-lg font-medium">No account details available</p><p class="text-sm">The processed accounts data could not be found</p></div></td></tr>'
+      }
             </tbody>
           </table>
         </div>
@@ -1647,6 +1701,7 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
 
     // If in DL w/ Transmittal mode, also fetch transmittal placeholders and combine them
     if (mode === "DL w/ Transmittal") {
+      document.getElementById("placeholdersLoadingOverlay").classList.remove("hidden")
       try {
         const response = await fetch(`${API_BASE}/transmittal_placeholders`, {
           method: "GET",
@@ -1693,6 +1748,9 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
         }
       } catch (error) {
         console.error("Error fetching transmittal placeholders:", error)
+      } finally {
+        // Hide loading overlay
+        document.getElementById("placeholdersLoadingOverlay").classList.add("hidden")
       }
     }
   }
@@ -1701,77 +1759,70 @@ document.getElementById("templateSelect").addEventListener("change", async (e) =
 document.getElementById("excelUpload").addEventListener("change", async (e) => {
   const file = e.target.files[0]
   if (file) {
-    // Show loading overlay
     document.getElementById("excelLoadingOverlay").classList.remove("hidden")
-
     const formData = new FormData()
     formData.append("file", file)
     try {
       const response = await fetch(`${API_BASE}/upload_excel`, {
         method: "POST",
         body: formData,
+        credentials: "include", // Added credentials
       })
       const data = await response.json()
-      
-      // Hide loading overlay
       document.getElementById("excelLoadingOverlay").classList.add("hidden")
 
       if (!response.ok) {
-        // Display error message from server
-        console.log("1",  data.detail)
-        showError(data.detail || "An error occurred while uploading the file.");
-        return;
+        showError(data.detail || "An error occurred while uploading the Excel file.")
+        document.getElementById("excelUpload").value = "" // Clear file input
+        return
       }
-
+      // ... rest of the success logic for displaying table ...
       const tableContainer = document.getElementById("dataTable")
-      tableContainer.innerHTML = ""
-      tableContainer.className = "max-h-[500px] overflow-auto rounded-lg border border-border-light"
+      // (Existing table rendering logic)
+      // Ensure data.data exists and is an array
+      if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+        tableContainer.innerHTML = "" // Clear previous preview
+        tableContainer.className = "max-h-[500px] overflow-auto rounded-lg border border-border-light"
 
-      // Create table
-      const table = document.createElement("table")
-      table.className = "min-w-full text-sm"
-
-      // Create thead with sticky header
-      const thead = document.createElement("thead")
-      const headerRow = document.createElement("tr")
-      headerRow.className = "border-b border-border-light bg-white"
-
-      Object.keys(data.data[0]).forEach((key) => {
-        const th = document.createElement("th")
-        th.className = "sticky top-0 bg-white z-10 text-left py-3 px-4 font-medium text-text-secondary"
-        th.textContent = key
-        headerRow.appendChild(th)
-      })
-      thead.appendChild(headerRow)
-      table.appendChild(thead)
-
-      // Create tbody
-      const tbody = document.createElement("tbody")
-      tbody.className = "divide-y divide-border-light"
-
-      data.data.forEach((row, index) => {
-        const tr = document.createElement("tr")
-        tr.className = `hover:bg-surface-hover transition-colors ${index % 2 === 0 ? "bg-gray-50" : "bg-white"}`
-
-        Object.values(row).forEach((value) => {
-          const td = document.createElement("td")
-          td.className = "px-4 py-3 text-text-secondary"
-          td.textContent = value
-          tr.appendChild(td)
+        const table = document.createElement("table")
+        table.className = "min-w-full text-sm"
+        const thead = document.createElement("thead")
+        const headerRow = document.createElement("tr")
+        headerRow.className = "border-b border-border-light bg-white"
+        Object.keys(data.data[0]).forEach((key) => {
+          const th = document.createElement("th")
+          th.className = "sticky top-0 bg-white z-10 text-left py-3 px-4 font-medium text-text-secondary"
+          th.textContent = key
+          headerRow.appendChild(th)
         })
+        thead.appendChild(headerRow)
+        table.appendChild(thead)
 
-        tbody.appendChild(tr)
-      })
-
-      table.appendChild(tbody)
-      tableContainer.appendChild(table)
-
-      // Show data preview section
-      document.getElementById("dataPreview").classList.remove("hidden")
+        const tbody = document.createElement("tbody")
+        tbody.className = "divide-y divide-border-light"
+        data.data.forEach((row, index) => {
+          const tr = document.createElement("tr")
+          tr.className = `hover:bg-surface-hover transition-colors ${index % 2 === 0 ? "bg-gray-50" : "bg-white"}`
+          Object.values(row).forEach((value) => {
+            const td = document.createElement("td")
+            td.className = "px-4 py-3 text-text-secondary"
+            td.textContent = value
+            tr.appendChild(td)
+          })
+          tbody.appendChild(tr)
+        })
+        table.appendChild(tbody)
+        tableContainer.appendChild(table)
+        document.getElementById("dataPreview").classList.remove("hidden")
+      } else {
+        showError("Uploaded Excel file is empty or has an invalid structure.")
+        document.getElementById("dataPreview").classList.add("hidden")
+      }
     } catch (error) {
-      // Hide loading overlay on error
       document.getElementById("excelLoadingOverlay").classList.add("hidden")
-      showError("Failed to upload Excel file. Please check file format.")
+      console.error("Excel upload error:", error)
+      showError(`Failed to upload Excel file: ${error.message}. Please check file format and network connection.`)
+      document.getElementById("excelUpload").value = "" // Clear file input
     }
   }
 })
@@ -2138,26 +2189,24 @@ async function updateUserTable() {
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex flex-wrap gap-1">
-                        ${
-                          Array.isArray(user.clients)
-                            ? user.clients
-                                .map(
-                                  (client) =>
-                                    `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
-                                )
-                                .join("")
-                            : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
-                        }
+                        ${Array.isArray(user.clients)
+          ? user.clients
+            .map(
+              (client) =>
+                `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
+            )
+            .join("")
+          : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
+        }
                     </div>
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex items-center gap-2">
                         <div class="w-3 h-3 rounded-full ${user.access === "admin" ? "bg-green-400" : "bg-blue-400"}"></div>
-                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${
-                          user.access === "admin"
-                            ? "bg-green-100 text-green-800 border border-green-200"
-                            : "bg-gray-100 text-gray-800 border border-gray-200"
-                        }">
+                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${user.access === "admin"
+          ? "bg-green-100 text-green-800 border border-green-200"
+          : "bg-gray-100 text-gray-800 border border-gray-200"
+        }">
                             ${user.access === "admin" ? "Administrator" : "User"}
                         </span>
                     </div>
@@ -2278,26 +2327,24 @@ function setupUserFilters(allUsers) {
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex flex-wrap gap-1">
-                        ${
-                          Array.isArray(user.clients)
-                            ? user.clients
-                                .map(
-                                  (client) =>
-                                    `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
-                                )
-                                .join("")
-                            : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
-                        }
+                        ${Array.isArray(user.clients)
+          ? user.clients
+            .map(
+              (client) =>
+                `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${client}</span>`,
+            )
+            .join("")
+          : `<span class="inline-flex items-center px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">${user.clients}</span>`
+        }
                     </div>
                 </td>
                 <td class="px-8 py-6">
                     <div class="flex items-center gap-2">
                         <div class="w-3 h-3 rounded-full ${user.access === "admin" ? "bg-green-400" : "bg-blue-400"}"></div>
-                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${
-                          user.access === "admin"
-                            ? "bg-green-100 text-green-800 border border-green-200"
-                            : "bg-gray-100 text-gray-800 border border-gray-200"
-                        }">
+                        <span class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-full ${user.access === "admin"
+          ? "bg-green-100 text-green-800 border border-green-200"
+          : "bg-gray-100 text-gray-800 border border-gray-200"
+        }">
                             ${user.access === "admin" ? "Administrator" : "Standard User"}
                         </span>
                     </div>
