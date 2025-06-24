@@ -37,7 +37,7 @@ def get_user_session_state(user_email: str):
         if user_email not in USER_SESSIONS:
             USER_SESSIONS[user_email] = get_fresh_session_state()
             # Create user-specific output directory
-            user_output_dir = OUTPUT_DIR / f"user_{uuid.uuid4().hex[:8]}_{user_email.replace('@', '_').replace('.', '_')}"
+            user_output_dir = OUTPUT_DIR / f"{user_email.replace('@', '_').replace('.', '_')}"
             os.makedirs(user_output_dir, exist_ok=True)
             USER_SESSIONS[user_email]['user_output_dir'] = user_output_dir
         return USER_SESSIONS[user_email]
