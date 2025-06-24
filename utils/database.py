@@ -6,7 +6,8 @@ from typing import List, Tuple, Optional
 import asyncio
 import json
 from datetime import datetime
-
+import uuid
+import time
 # Create a connection pool for asyncpg
 DB_POOL = None
 
@@ -349,7 +350,10 @@ async def add_processed_accounts(audit_id: int, raw_accounts: List[Tuple]):
                 audit_id_val, dl_code, leads_chname, dl_address, final_area = acc
                 
                 # Generate unique doc_code for each record individually
-                doc_code = await generate_doc_code_individual(conn)
+                date_str = datetime.now().strftime('%Y%m%d')
+                timestamp_suffix = str(int(time.time() * 1000000))[-5:]
+                uuid_suffix = uuid.uuid4().hex[:4].upper()
+                doc_code = f"DOC-{date_str}-{timestamp_suffix}{uuid_suffix}"
                 accounts.append((audit_id_val, doc_code, dl_code, leads_chname, dl_address, final_area))
 
             # Insert all accounts in a single transaction
@@ -370,12 +374,11 @@ async def add_processed_accounts(audit_id: int, raw_accounts: List[Tuple]):
                         # Very unlikely with UUID, but handle gracefully
                         logger.warning(f"Duplicate doc_code detected for {account[1]} (UUID collision - very rare)")
                         # Generate a new UUID-based code
-                        import uuid
-                        import time
                         date_str = datetime.now().strftime('%Y%m%d')
                         timestamp_suffix = str(int(time.time() * 1000000))[-5:]
-                        new_doc_code = f"DOC-{date_str}-{timestamp_suffix}"
-                        
+                        uuid_suffix = uuid.uuid4().hex[:4].upper()
+                        new_doc_code = f"DOC-{date_str}-{timestamp_suffix}{uuid_suffix}"
+                                
                         new_account = (account[0], new_doc_code, account[2], account[3], account[4], account[5])
                         try:
                             await conn.execute(
