@@ -6,7 +6,8 @@ from typing import List, Tuple, Optional
 import asyncio
 import json
 from datetime import datetime
-
+import uuid
+import time
 # Create a connection pool for asyncpg
 DB_POOL = None
 
@@ -340,16 +341,23 @@ async def add_audit_entry(client: str, processed_by: str, total_accounts: int, m
             raise
 
 async def add_processed_accounts(audit_id: int, raw_accounts: List[Tuple]):
-    """Add processed accounts to database asynchronously with unique doc code generation"""
+    """
+    Add processed accounts to database asynchronously with UUID-based unique doc_code generation.
+    raw_accounts: List of tuples like (audit_id, dl_code, leads_chname, dl_address, final_area)
+    """
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         try:
             accounts = []
             for acc in raw_accounts:
                 audit_id_val, dl_code, leads_chname, dl_address, final_area = acc
-                
-                # Generate unique doc_code for each record individually
-                doc_code = await generate_doc_code_individual(conn)
+
+                # Inline unique doc_code generation
+                date_str = datetime.now().strftime('%Y%m%d')
+                timestamp_suffix = str(int(time.time() * 1000000))[-5:]
+                uuid_suffix = uuid.uuid4().hex[:4].upper()
+                doc_code = f"DOC-{date_str}-{timestamp_suffix}{uuid_suffix}"
+
                 accounts.append((audit_id_val, doc_code, dl_code, leads_chname, dl_address, final_area))
 
             # Insert all accounts in a single transaction
@@ -367,15 +375,14 @@ async def add_processed_accounts(audit_id: int, raw_accounts: List[Tuple]):
                         )
                         successful_inserts += 1
                     except asyncpg.UniqueViolationError:
-                        # Very unlikely with UUID, but handle gracefully
-                        logger.warning(f"Duplicate doc_code detected for {account[1]} (UUID collision - very rare)")
-                        # Generate a new UUID-based code
-                        import uuid
-                        import time
+                        logger.warning(f"Duplicate doc_code detected for {account[1]} (UUID collision - rare)")
+                        
+                        # Retry with a new doc_code
                         date_str = datetime.now().strftime('%Y%m%d')
                         timestamp_suffix = str(int(time.time() * 1000000))[-5:]
-                        new_doc_code = f"DOC-{date_str}-{timestamp_suffix}"
-                        
+                        uuid_suffix = uuid.uuid4().hex[:4].upper()
+                        new_doc_code = f"DOC-{date_str}-{timestamp_suffix}{uuid_suffix}"
+
                         new_account = (account[0], new_doc_code, account[2], account[3], account[4], account[5])
                         try:
                             await conn.execute(
@@ -388,12 +395,11 @@ async def add_processed_accounts(audit_id: int, raw_accounts: List[Tuple]):
                             )
                             successful_inserts += 1
                         except Exception as retry_error:
-                            logger.error(f"Failed to insert account even after regenerating doc_code: {retry_error}")
-                            # Continue with other accounts rather than failing the entire batch
-                            continue
-                
-                logger.debug(f"Added {successful_inserts}/{len(accounts)} processed accounts to database")
-                
+                            logger.error(f"Failed to insert after regenerating doc_code: {retry_error}")
+                            continue  # Continue with the rest of the batch
+
+                logger.debug(f"Inserted {successful_inserts}/{len(accounts)} processed accounts")
+
         except Exception as e:
             logger.error(f"Failed to add processed accounts (async): {e}")
             raise

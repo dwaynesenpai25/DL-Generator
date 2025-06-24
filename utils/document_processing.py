@@ -445,7 +445,7 @@ async def generate_pdfs_stream(uploaded_file, dataframe: pd.DataFrame, user_info
                     
                     if all_docx_files:
                         # Calculate batches
-                        batch_size = 300
+                        batch_size = 350
                         batches = [all_docx_files[i:i + batch_size] for i in range(0, len(all_docx_files), batch_size)]
                         total_batches = len(batches)
                         

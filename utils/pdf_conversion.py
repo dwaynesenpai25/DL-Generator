@@ -269,7 +269,7 @@ def run_subprocess_sync(cmd, timeout):
     except Exception as e:
         raise RuntimeError(f"Subprocess execution failed: {e}")
 
-async def batch_convert_libreoffice(docx_files, output_dir, batch_size=300, progress_callback=None):
+async def batch_convert_libreoffice(docx_files, output_dir, batch_size=350, progress_callback=None):
     # Log the event loop type for debugging
     loop = asyncio.get_running_loop()
     logger.debug(f"Event loop for batch_convert_libreoffice: {type(loop)}")
