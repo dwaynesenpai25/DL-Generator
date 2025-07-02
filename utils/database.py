@@ -284,33 +284,6 @@ async def delete_user_sessions(email: str):
             logger.error(f"Failed to delete sessions for user {email}: {e}")
             return 0
 
-# Existing functions remain the same...
-async def generate_doc_code() -> str:
-    """Generate a new DOC-YYYYMMDD-XXXX code based on max existing doc_code"""
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():  # Use transaction for consistency
-            try:
-                date_str = datetime.now().strftime('%Y%m%d')
-                prefix = f"DOC-{date_str}"
-
-                # Use a more robust query to extract the numeric part
-                row = await conn.fetchrow('''
-                    SELECT COALESCE(MAX(CAST(SUBSTRING(doc_code FROM LENGTH($1) + 2) AS INTEGER)), 0) AS max_num
-                    FROM processed_accounts
-                    WHERE doc_code LIKE $2
-                    FOR UPDATE
-                ''', prefix, f"{prefix}-%")
-
-                max_num = row['max_num'] if row and row['max_num'] is not None else 0
-                next_number = max_num + 1
-                new_code = f"{prefix}-{next_number:04d}"
-                
-                return new_code
-            except Exception as e:
-                logger.error(f"Failed to generate doc_code (async): {e}")
-                raise HTTPException(status_code=500, detail="Failed to generate document code")
-
 async def get_user_clients_and_access(email: str) -> Tuple[List[str], Optional[str]]:
     """Get user's assigned clients and access level from database asynchronously"""
     pool = await get_db_pool()
@@ -545,7 +518,7 @@ async def get_audit_details_paginated(audit_id: int, page: int = 1, limit: int =
             
             offset = (page - 1) * limit
             account_rows = await conn.fetch("""
-                SELECT dl_code, leads_chname, dl_address, final_area
+                SELECT dl_code, doc_code, leads_chname, dl_address, final_area
                 FROM processed_accounts
                 WHERE audit_id = $1
                 ORDER BY id
@@ -556,6 +529,7 @@ async def get_audit_details_paginated(audit_id: int, page: int = 1, limit: int =
             for row in account_rows:
                 accounts.append({
                     "dl_code": row["dl_code"],
+                    "doc_code": row["doc_code"],
                     "name": row["leads_chname"],
                     "address": row["dl_address"],
                     "area": row["final_area"]

@@ -1,5 +1,6 @@
 let currentUser = null
-const API_BASE = "http://localhost:5000/api"
+const API_BASE = "http://172.20.0.86:5000/api"
+// const API_BASE = "http://localhost:5000/api"
 let isProcessing = false
 
 // Initialize UI and check session
@@ -8,6 +9,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelector(".card:has(#modeSelect)").classList.add("hidden")
   setupMobileMenu()
   setupFolderSelectionButtons()
+  setupReloadPrevention()
+
   const urlParams = new URLSearchParams(window.location.search)
   if (urlParams.get("code")) {
     await handleLarkCallback(urlParams.get("code"))
@@ -15,6 +18,116 @@ document.addEventListener("DOMContentLoaded", async () => {
     await checkSession()
   }
 })
+
+// Setup reload prevention during processing
+function setupReloadPrevention() {
+  window.addEventListener("beforeunload", (e) => {
+    if (isProcessing) {
+      const message =
+        "Document generation is in progress. Leaving this page will cancel the process. Are you sure you want to leave?"
+      e.preventDefault()
+      e.returnValue = message
+      return message
+    }
+  })
+
+  // Prevent back/forward navigation during processing
+  window.addEventListener("popstate", (e) => {
+    if (isProcessing) {
+      // Push the current state back to prevent navigation
+      history.pushState(null, null, window.location.pathname)
+      showError(
+        "Cannot navigate away while document generation is in progress. Please wait for the process to complete.",
+      )
+    }
+  })
+}
+
+// Show no-clients modal (non-removable)
+function showNoClientsModal() {
+  const existingModal = document.getElementById("noClientsModal")
+  if (existingModal) {
+    return // Modal already exists
+  }
+
+  const modalHTML = `
+    <div id="noClientsModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[9999] p-4">
+      <div class="glass-effect p-8 rounded-2xl shadow-large w-full max-w-md transform animate-fade-in">
+        <div class="text-center mb-6">
+          <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z">
+              </path>
+            </svg>
+          </div>
+          <h2 class="text-2xl font-bold text-text-primary mb-2">No Access Configured</h2>
+          <p class="text-text-secondary mb-4">You don't have access to any client folders yet.</p>
+        </div>
+        
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+              </path>
+            </svg>
+            <div>
+              <p class="font-medium text-yellow-800 mb-1">What to do next:</p>
+              <ul class="text-sm text-yellow-700 space-y-1">
+                <li>• Contact your system administrator</li>
+                <li>• Request access to the client folders you need</li>
+                <li>• Wait for the administrator to configure your access</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        
+        <div class="text-center">
+          <div class="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-800 rounded-lg text-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+              </path>
+            </svg>
+            Contact Administrator for Access
+          </div>
+          <p class="text-xs text-text-secondary mt-2">This message will disappear once access is granted</p>
+        </div>
+      </div>
+    </div>
+  `
+
+  document.body.insertAdjacentHTML("beforeend", modalHTML)
+
+  // Disable all interactive elements except logout
+  const interactiveElements = document.querySelectorAll(
+    'button:not(#logoutButton), input, select, textarea, a:not([href="#"])',
+  )
+  interactiveElements.forEach((element) => {
+    if (!element.closest("#noClientsModal") && element.id !== "logoutButton") {
+      element.disabled = true
+      element.style.opacity = "0.5"
+      element.style.pointerEvents = "none"
+    }
+  })
+}
+
+// Hide no-clients modal and re-enable interface
+function hideNoClientsModal() {
+  const modal = document.getElementById("noClientsModal")
+  if (modal) {
+    modal.remove()
+
+    // Re-enable all interactive elements
+    const interactiveElements = document.querySelectorAll("button, input, select, textarea, a")
+    interactiveElements.forEach((element) => {
+      element.disabled = false
+      element.style.opacity = ""
+      element.style.pointerEvents = ""
+    })
+  }
+}
 
 // Enhanced progress display with detailed stages
 function updateProgressDisplay(data) {
@@ -343,7 +456,14 @@ async function checkSession() {
 
         setUserAvatar(currentUser.userInfo)
         updateNavigationAccess()
-        fetchFolders()
+
+        // Check if user has no clients and show modal if needed
+        if (!currentUser.clients || currentUser.clients.length === 0) {
+          showNoClientsModal()
+        } else {
+          hideNoClientsModal()
+          fetchFolders()
+        }
       } else {
         showLoginModal()
       }
@@ -374,7 +494,15 @@ function updateNavigationAccess() {
   const userManagementMenu = document.getElementById("userManagementMenu")
   const auditTrailMenu = document.getElementById("auditTrailMenu")
 
-  if (currentUser && currentUser.access === "admin") {
+  // Check if user has admin access (check both 'access' and 'role' properties for compatibility)
+  const isAdmin =
+    currentUser &&
+    (currentUser.access === "admin" ||
+      currentUser.role === "admin" ||
+      currentUser.access === "" ||
+      currentUser.role === "")
+  console.log("admins", currentUser)
+  if (isAdmin) {
     userManagementMenu.style.display = "flex"
     auditTrailMenu.style.display = "flex"
   } else {
@@ -400,12 +528,14 @@ async function handleLarkCallback(code) {
     const data = await response.json()
 
     if (data.success) {
+      console.log("callback", data)
       currentUser = { username: data.username, role: data.role }
       document.getElementById("loginModal").classList.add("hidden")
       document.getElementById("mainContent").classList.remove("hidden")
       document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`
       window.history.replaceState({}, document.title, "/")
       await checkSession()
+      updateNavigationAccess()
     } else {
       document.getElementById("loginError").classList.remove("hidden")
       document.getElementById("loginError").textContent = data.detail || "Authentication failed."
@@ -434,6 +564,7 @@ document.getElementById("logoutButton").addEventListener("click", async () => {
       currentUser = null
       showLoginModal()
       resetUI()
+      hideNoClientsModal() // Hide the no-clients modal on logout
       window.history.replaceState({}, document.title, "/")
     } else {
       showError(data.detail || "Logout failed.")
@@ -447,6 +578,7 @@ function showLoginModal() {
   document.getElementById("mainContent").classList.add("hidden")
   document.getElementById("loginModal").classList.remove("hidden")
   document.getElementById("loginError").classList.add("hidden")
+  hideNoClientsModal() // Hide no-clients modal when showing login
 }
 
 function redirectToLogin() {
@@ -651,6 +783,132 @@ async function fetchFolders() {
     showError(`Failed to fetch folders: ${error.message}. Please check FTP configuration or server status.`)
   }
 }
+
+// Enhanced generate button with improved progress handling and reload prevention
+document.getElementById("generateButton").addEventListener("click", async () => {
+  const file = document.getElementById("excelUpload").files[0]
+  if (!file) {
+    showError("Please upload an Excel file")
+    return
+  }
+
+  // Set processing state and prevent reloads
+  isProcessing = true
+  toggleInputFields(true)
+
+  // Push current state to prevent back navigation
+  history.pushState(null, null, window.location.pathname)
+
+  document.getElementById("progressSection").classList.remove("hidden")
+  document.getElementById("errorMessage").classList.add("hidden")
+  const progressBar = document.getElementById("progressBar")
+  const progressText = document.getElementById("progressText")
+  const resultSection = document.getElementById("resultSection")
+  const downloadButton = document.getElementById("downloadButton")
+  const cleanupButton = document.getElementById("cleanupButton")
+
+  progressBar.style.width = "0%"
+  progressText.innerHTML = '<span class="text-blue-600">🚀</span> Starting processing...'
+
+  clearResultSection()
+
+  const formData = new FormData()
+  formData.append("file", file)
+
+  let timeoutId
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error("Processing timed out after 120 seconds"))
+    }, 120000)
+  })
+
+  try {
+    const response = await Promise.race([
+      fetch(`${API_BASE}/generate_pdfs`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      }),
+      timeoutPromise,
+    ])
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin()
+        return
+      }
+      const errorData = await response.json()
+      throw new Error(errorData.detail || "Server error")
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      try {
+        const chunk = decoder.decode(value, { stream: true })
+        const jsonObjects = chunk.split("\n").filter((line) => line.trim())
+
+        for (const jsonStr of jsonObjects) {
+          try {
+            const data = JSON.parse(jsonStr)
+
+            if (data.error) {
+              showError(data.error)
+              return
+            }
+
+            // Use enhanced progress display
+            updateProgressDisplay(data)
+
+            if (data.download_ready) {
+              resultSection.classList.remove("hidden")
+              downloadButton.classList.remove("hidden")
+              cleanupButton.classList.remove("hidden")
+              downloadButton.onclick = () => {
+                window.location.href = `${API_BASE}/download_zip`
+              }
+            }
+
+            // Handle print-ready response with enhanced UI
+            if (data.print_ready) {
+              resultSection.classList.remove("hidden")
+              cleanupButton.classList.remove("hidden")
+
+              // Load available printers
+              const printers = await loadAvailablePrinters()
+
+              // Create enhanced print controls
+              const printContainer = createPrintControls(data.areas, printers)
+              resultSection.appendChild(printContainer)
+            }
+          } catch (jsonError) {
+            console.error("Error parsing JSON chunk:", jsonError, jsonStr)
+          }
+        }
+      } catch (chunkError) {
+        console.error("Error processing chunk:", chunkError)
+      }
+    }
+  } catch (error) {
+    clearTimeout(timeoutId)
+    showError(`Failed to generate PDFs: ${error.message}`)
+    progressText.innerHTML = '<span class="text-red-600">❌</span> Processing failed.'
+    progressBar.style.width = "0%"
+  } finally {
+    // Reset processing state
+    isProcessing = false
+    toggleInputFields(false)
+  }
+})
+
+// Rest of the existing functions remain the same...
+// [Include all the remaining functions from the original script.js file]
 
 // Load template folders for user modal
 async function loadTemplateFoldersForModal() {
@@ -1878,13 +2136,45 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
         return
       }
 
-      const tableContainer = document.getElementById("dataTable")
       if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+        const totalRows = data.data.length
+        const previewRows = data.data.slice(0, 10) // Show only first 10 rows
+
+        // Create row count display
+        const rowCountDisplay = document.createElement("div")
+        rowCountDisplay.className = "mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg"
+        rowCountDisplay.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+            </div>
+            <div>
+              <p class="font-semibold text-blue-800">Excel File Loaded Successfully</p>
+              <p class="text-sm text-blue-600">
+                <span class="font-medium">${totalRows} data rows</span> found 
+                ${totalRows > 10 ? `(showing first 10 rows in preview)` : ""}
+              </p>
+            </div>
+          </div>
+        `
+
+        const tableContainer = document.getElementById("dataTable")
         tableContainer.innerHTML = ""
-        tableContainer.className = "max-h-[500px] overflow-auto rounded-lg border border-border-light"
+        tableContainer.className = "space-y-4"
+
+        // Add row count display
+        tableContainer.appendChild(rowCountDisplay)
+
+        // Create table container
+        const tableWrapper = document.createElement("div")
+        tableWrapper.className = "max-h-[400px] overflow-auto rounded-lg border border-border-light"
 
         const table = document.createElement("table")
         table.className = "min-w-full text-sm"
+
+        // Create header
         const thead = document.createElement("thead")
         const headerRow = document.createElement("tr")
         headerRow.className = "border-b border-border-light bg-white"
@@ -1897,9 +2187,10 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
         thead.appendChild(headerRow)
         table.appendChild(thead)
 
+        // Create body with limited rows
         const tbody = document.createElement("tbody")
         tbody.className = "divide-y divide-border-light"
-        data.data.forEach((row, index) => {
+        previewRows.forEach((row, index) => {
           const tr = document.createElement("tr")
           tr.className = `hover:bg-surface-hover transition-colors ${index % 2 === 0 ? "bg-gray-50" : "bg-white"}`
           Object.values(row).forEach((value) => {
@@ -1910,8 +2201,23 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
           })
           tbody.appendChild(tr)
         })
+
+        // Add "more rows" indicator if there are more than 10 rows
+        if (totalRows > 10) {
+          const moreRowsIndicator = document.createElement("tr")
+          moreRowsIndicator.className = "bg-gray-100"
+          const td = document.createElement("td")
+          td.colSpan = Object.keys(data.data[0]).length
+          td.className = "px-4 py-3 text-center text-gray-500 italic"
+          td.textContent = `... and ${totalRows - 10} more rows`
+          moreRowsIndicator.appendChild(td)
+          tbody.appendChild(moreRowsIndicator)
+        }
+
         table.appendChild(tbody)
-        tableContainer.appendChild(table)
+        tableWrapper.appendChild(table)
+        tableContainer.appendChild(tableWrapper)
+
         document.getElementById("dataPreview").classList.remove("hidden")
       } else {
         showError("Uploaded Excel file is empty or has an invalid structure.")
@@ -1923,124 +2229,6 @@ document.getElementById("excelUpload").addEventListener("change", async (e) => {
       showError(`Failed to upload Excel file: ${error.message}. Please check file format and network connection.`)
       document.getElementById("excelUpload").value = ""
     }
-  }
-})
-
-// Enhanced generate button with improved progress handling
-document.getElementById("generateButton").addEventListener("click", async () => {
-  const file = document.getElementById("excelUpload").files[0]
-  if (!file) {
-    showError("Please upload an Excel file")
-    return
-  }
-
-  isProcessing = true
-  toggleInputFields(true)
-
-  document.getElementById("progressSection").classList.remove("hidden")
-  document.getElementById("errorMessage").classList.add("hidden")
-  const progressBar = document.getElementById("progressBar")
-  const progressText = document.getElementById("progressText")
-  const resultSection = document.getElementById("resultSection")
-  const downloadButton = document.getElementById("downloadButton")
-  const cleanupButton = document.getElementById("cleanupButton")
-
-  progressBar.style.width = "0%"
-  progressText.innerHTML = '<span class="text-blue-600">🚀</span> Starting processing...'
-
-  clearResultSection()
-
-  const formData = new FormData()
-  formData.append("file", file)
-
-  let timeoutId
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error("Processing timed out after 120 seconds"))
-    }, 120000)
-  })
-
-  try {
-    const response = await Promise.race([
-      fetch(`${API_BASE}/generate_pdfs`, {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      }),
-      timeoutPromise,
-    ])
-
-    clearTimeout(timeoutId)
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin()
-        return
-      }
-      const errorData = await response.json()
-      throw new Error(errorData.detail || "Server error")
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      try {
-        const chunk = decoder.decode(value, { stream: true })
-        const jsonObjects = chunk.split("\n").filter((line) => line.trim())
-
-        for (const jsonStr of jsonObjects) {
-          try {
-            const data = JSON.parse(jsonStr)
-
-            if (data.error) {
-              showError(data.error)
-              return
-            }
-
-            // Use enhanced progress display
-            updateProgressDisplay(data)
-
-            if (data.download_ready) {
-              resultSection.classList.remove("hidden")
-              downloadButton.classList.remove("hidden")
-              cleanupButton.classList.remove("hidden")
-              downloadButton.onclick = () => {
-                window.location.href = `${API_BASE}/download_zip`
-              }
-            }
-
-            // Handle print-ready response with enhanced UI
-            if (data.print_ready) {
-              resultSection.classList.remove("hidden")
-              cleanupButton.classList.remove("hidden")
-
-              // Load available printers
-              const printers = await loadAvailablePrinters()
-
-              // Create enhanced print controls
-              const printContainer = createPrintControls(data.areas, printers)
-              resultSection.appendChild(printContainer)
-            }
-          } catch (jsonError) {
-            console.error("Error parsing JSON chunk:", jsonError, jsonStr)
-          }
-        }
-      } catch (chunkError) {
-        console.error("Error processing chunk:", chunkError)
-      }
-    }
-  } catch (error) {
-    clearTimeout(timeoutId)
-    showError(`Failed to generate PDFs: ${error.message}`)
-    progressText.innerHTML = '<span class="text-red-600">❌</span> Processing failed.'
-    progressBar.style.width = "0%"
-  } finally {
-    isProcessing = false
-    toggleInputFields(false)
   }
 })
 
@@ -2332,7 +2520,7 @@ async function updateUserTable() {
     // Setup search and filter functionality
     setupUserFilters(users)
   } catch (error) {
-    userTableBody = document.getElementById("userTableBody")
+    const userTableBody = document.getElementById("userTableBody")
     userTableBody.innerHTML = `
             <tr>
                 <td colspan="4" class="px-8 py-12 text-center text-red-500">

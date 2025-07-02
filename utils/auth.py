@@ -43,6 +43,7 @@ async def get_user_access_token(auth_code: str, tenant_access_token: str):
     try:
         response = await run_sync_request(requests.post, USER_ACCESS_TOKEN_URL, json=data, headers=headers)
         response_data = response.json()
+        print(response_data)
         if "data" not in response_data or "access_token" not in response_data["data"]:
             logger.error(f"Failed to get user access token: {response_data}")
             raise HTTPException(status_code=401, detail="Failed to get user access token")

@@ -140,8 +140,13 @@ def fetch_signature_from_ftp(ftp: FTP):
     
     # Using the hardcoded path from the original file for now
     # TODO: Revert to dynamic date logic or make configurable if needed
-    fixed_date_str = "05-29-2025" # As per original code's effective path
-    ftp_path = f"field/DL/ATTY SIGNATURE/{fixed_date_str}"
+    # fixed_date_str = "05-29-2025" # As per original code's effective path
+    # ftp_path = f"field/DL/ATTY SIGNATURE/{fixed_date_str}"
+    # Get the current date
+    current_date_str = datetime.now().strftime("%m-%d-%Y")  # Format as MM-DD-YYYY
+
+    # Construct the dynamic FTP path
+    ftp_path = f"field/DL/ATTY SIGNATURE/{current_date_str}"
     signature_filename = "attySignature.PNG"
 
     try:

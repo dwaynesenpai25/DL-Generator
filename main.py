@@ -80,11 +80,12 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutdown complete.")
 
 app = FastAPI(title="DL Generator API", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# app.mount("/static", StaticFiles(directory="static"), name="static")
 
 origins = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000"
+    # "http://localhost:8000",
+    # "http://127.0.0.1:8000"
+    "http://172.20.0.86:8000"
 ]
 
 app.add_middleware(
@@ -94,6 +95,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Enhanced user auto-creation function
+async def ensure_user_exists(user_email: str):
+    """
+    Ensures a user exists in the database. If not, creates them with default settings.
+    Returns tuple of (user_clients, user_access, was_created)
+    """
+    try:
+        user_clients, user_access = await get_user_clients_and_access(user_email)
+        
+        # If user doesn't exist (both clients and access are None/empty), create them
+        if not user_clients and user_access is None:
+            from utils.models import UserCreate
+            new_user = UserCreate(
+                email=user_email,
+                clients=[],  # Empty clients list - will trigger no-clients modal
+                access="user"  # Default to regular user
+            )
+            
+            try:
+                await db_create_new_user(new_user)
+                logger.info(f"Auto-created new user: {user_email} with default settings")
+                # Return the default values we just created
+                return [], "user", True
+            except Exception as create_error:
+                logger.error(f"Failed to auto-create user {user_email}: {create_error}")
+                # Return defaults even if creation fails
+                return [], "user", False
+        
+        return user_clients, user_access, False
+        
+    except Exception as e:
+        logger.error(f"Error in ensure_user_exists for {user_email}: {e}")
+        # Return defaults if there's any error
+        return [], "user", False
 
 # Authentication endpoints
 @app.get("/api/login")
@@ -112,6 +148,12 @@ async def lark_callback(code: str, response: Response):
             raise HTTPException(status_code=401, detail="Failed to retrieve user info")
         
         user_email = user_info_data.get("email", "")
+
+        # Ensure user exists in database (auto-create if needed)
+        user_clients, user_access, was_created = await ensure_user_exists(user_email)
+        
+        if was_created:
+            logger.info(f"New user {user_email} was auto-created during login")
         
         # Check if user already has an active session
         from utils.database import check_existing_user_session, delete_user_sessions
@@ -121,7 +163,7 @@ async def lark_callback(code: str, response: Response):
             logger.warning(f"User {user_email} attempted to login but already has an active session")
             raise HTTPException(
                 status_code=409, 
-                detail="You already have an active session in another browser. Please close that session first or contact an administrator."
+                detail="You already have an active session in another browser. Please logout first or contact an administrator."
             )
         
         session_id = str(uuid.uuid4())
@@ -140,13 +182,9 @@ async def lark_callback(code: str, response: Response):
         
         logger.info(f"Created session: {session_id} for user: {user_email}")
         
-        user_clients, user_access = await get_user_clients_and_access(user_email)
-        
         role = "User"
         if user_access == "admin":
             role = "Admin"
-        elif not user_access and user_email.endswith("@spmadridlaw.com"):
-             role = "Admin"
 
         response.set_cookie(
             key="session_id", value=session_id, httponly=True, 
@@ -244,12 +282,15 @@ async def check_session(request: Request):
         
         user_info = session["user_info"]
         user_email = user_info.get("email", "")
-        user_clients, user_access = await get_user_clients_and_access(user_email)
+        
+        # Ensure user exists in database (auto-create if needed)
+        user_clients, user_access, was_created = await ensure_user_exists(user_email)
+        
+        if was_created:
+            logger.info(f"User {user_email} was auto-created during session check")
 
         access_level = "user"
         if user_access == "admin":
-            access_level = "admin"
-        elif not user_access and user_email.endswith("@spmadridlaw.com"):
             access_level = "admin"
         
         return {
@@ -527,18 +568,4 @@ async def serve_index(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    # Ensure the static directory exists
-    static_dir = Path("static")
-    if not static_dir.exists():
-        static_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created static directory at {static_dir.resolve()}")
-        
-    # Ensure index.html exists
-    index_html = Path("index.html")
-    if not index_html.exists():
-        logger.error(f"index.html not found at {index_html.resolve()}. Please ensure it's in the root directory.")
-        with open(index_html, "w") as f:
-            f.write("<html><body><h1>DL Generator Placeholder</h1><p>If you see this, index.html was missing.</p></body></html>")
-        logger.info(f"Created placeholder index.html.")
-
     uvicorn.run("main:app", host="0.0.0.0", port=5000, reload=True)

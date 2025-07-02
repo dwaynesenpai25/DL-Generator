@@ -16,7 +16,7 @@ from utils.config import logger
 from utils.session_management import get_user_session_state
 from utils.document_utils import generate_barcode, generate_qrcode, amount_to_words, combine_templates, extract_placeholders
 from utils.pdf_conversion import batch_convert_libreoffice
-from utils.database import generate_doc_code, add_audit_entry, add_processed_accounts
+from utils.database import add_audit_entry, add_processed_accounts
 import os
 import re
 import traceback
@@ -445,7 +445,7 @@ async def generate_pdfs_stream(uploaded_file, dataframe: pd.DataFrame, user_info
                     
                     if all_docx_files:
                         # Calculate batches
-                        batch_size = 350
+                        batch_size = 300
                         batches = [all_docx_files[i:i + batch_size] for i in range(0, len(all_docx_files), batch_size)]
                         total_batches = len(batches)
                         

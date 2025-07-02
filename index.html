@@ -18,11 +18,10 @@
     </div>
 
     <!-- Login Modal -->
-    <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-        <div class="glass-effect p-8 rounded-2xl shadow-large w-full max-w-md transform animate-fade-in">
+    <!-- <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
+        <div class="glass-effect bg-green-600 p-8 rounded-2xl shadow-large w-full max-w-md transform animate-fade-in">
             <div class="text-center mb-8">
-                <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
-                    style="background-color: #299251;">
+                <div class="w-16 h-16 rounded-full bg-gray-400 flex items-center justify-center mx-auto mb-4">
                     <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
@@ -33,13 +32,9 @@
                 <p class="text-text-secondary">Sign in to continue to your dashboard</p>
             </div>
             <button id="loginButton"
-                class="btn w-full text-white py-3 px-6 rounded-xl font-medium shadow-medium hover:brightness-90"
-                style="background-color: #299251;">
-                <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
-                    </path>
-                </svg>
+                class="btn bg-green-600 w-full text-white py-3 px-6 rounded-xl font-medium shadow-medium hover:brightness-90"
+                >
+                <img class="w-7 h-7 inline mr-2" src="./img/lark.png"/>
                 Login with Lark
             </button>
             <p id="loginError"
@@ -47,17 +42,61 @@
                 Authentication failed. Please try again.
             </p>
         </div>
+    </div> -->
+
+    <!-- Modern Gradient Design -->
+    <div id="loginModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md transform animate-fade-in overflow-hidden">
+            <!-- Header with gradient -->
+            <div class="bg-gradient-to-br from-green-600 via-white-600 to-green-800 p-8 text-center">
+                <div
+                    class="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                        </path>
+                    </svg>
+                </div>
+                <h2 class="text-3xl font-bold text-white mb-2">Welcome Back</h2>
+                <p class="text-green-100">Sign in to access DL Generator</p>
+            </div>
+
+            <!-- Content -->
+            <div class="p-8">
+                <button id="loginButton"
+                    class="w-full bg-gradient-to-r from-green-600 to-green-600 hover:from-green-700 hover:to-green-700 text-white py-4 px-6 rounded-2xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-3">
+                    <img class="w-6 h-6" src="./img/lark.png" alt="Lark" />
+                    Continue with Lark
+                </button>
+
+                <div class="mt-6 text-center">
+                    <p class="text-sm text-gray-500">Secure authentication powered by Lark</p>
+                </div>
+
+                <div id="loginError"
+                    class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span>Authentication failed. Please try again.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+
 
 
     <!-- Mobile Menu Overlay -->
     <div id="mobileMenuOverlay" class="fixed inset-0 mobile-menu-overlay z-40 md:hidden hidden"></div>
 
     <!-- Main Layout -->
-    <div id="mainContent" class="hidden min-h-screen bg-background">
+    <div id="mainContent" class="hidden min-h-screen ">
         <!-- Sidebar -->
         <aside id="sidebar"
-            class="mobile-sidebar fixed left-0 top-0 h-full w-64 sidebar-gradient text-white z-50 md:translate-x-0">
+            class="mobile-sidebar fixed left-0 top-0 h-full w-64 sidebar-gradient text-white bg-green-600 z-50 md:translate-x-0">
             <div class="flex flex-col h-full">
                 <!-- Logo -->
                 <div class="p-6 border-b border-white border-opacity-20">
@@ -77,7 +116,7 @@
                 </div>
 
                 <!-- Navigation -->
-                <nav class="flex-1 p-4 space-y-2">
+                <nav class="flex-1 p-4 space-y-2 ">
                     <a href="#" id="dlGeneratorMenu"
                         class="nav-item active flex items-center gap-3 px-4 py-3 rounded-lg text-white">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -189,31 +228,31 @@
                             class="w-full p-3 border border-border-medium rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-surface">
                             <option value="">Select Output Format</option>
                             <option value="zip">Download as ZIP file</option>
-                            <option value="print">Print directly</option>
+                            <option disabled value="print">Print directly</option>
                         </select>
 
                         <!-- Format info messages -->
-                        <div id="zipFormatInfo" class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div id="zipFormatInfo" class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
                             <div class="flex items-center gap-2">
-                                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor"
+                                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
-                                <p class="text-sm text-blue-700">Documents will be packaged in a ZIP file for download.
+                                <p class="text-sm text-green-700">Documents will be packaged in a ZIP file for download.
                                 </p>
                             </div>
                         </div>
 
-                        <div id="printFormatInfo" class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 hidden">
+                        <div id="printFormatInfo" class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 hidden">
                             <div class="flex items-center gap-2">
-                                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor"
+                                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z">
                                     </path>
                                 </svg>
-                                <p class="text-sm text-blue-700">Documents will be sent to your selected printer by
+                                <p class="text-sm text-green-700">Documents will be sent to your selected printer by
                                     area. You can choose from available printers.</p>
                             </div>
                         </div>
@@ -244,9 +283,9 @@
 
                     <!-- Template Already Combined Alert -->
                     <div id="templateCombinedAlert" class="hidden">
-                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 animate-fade-in">
+                        <div class="bg-green-50 border border-green-200 rounded-xl p-4 animate-fade-in">
                             <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                                     <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor"
                                         viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -254,8 +293,8 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <p class="font-medium text-blue-900">Template Ready</p>
-                                    <p class="text-sm text-blue-700">The selected template has been processed and
+                                    <p class="font-medium text-green-900">Template Ready</p>
+                                    <p class="text-sm text-green-700">The selected template has been processed and
                                         combined.</p>
                                 </div>
                             </div>
@@ -264,18 +303,18 @@
 
                     <!-- Status Display -->
                     <div id="statusDisplay" class="hidden">
-                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                        <div class="bg-green-50 border border-green-200 rounded-xl p-4">
                             <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor"
+                                <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor"
                                         viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M5 13l4 4L19 7"></path>
                                     </svg>
                                 </div>
                                 <div>
-                                    <p class="font-medium text-blue-900">Success!</p>
-                                    <p id="templateStatusText" class="text-sm text-blue-700"></p>
+                                    <p class="font-medium text-green-900">Success!</p>
+                                    <p id="templateStatusText" class="text-sm text-green-700"></p>
                                 </div>
                             </div>
                         </div>
@@ -338,21 +377,21 @@
                             </div>
                         </div>
                     </div>
-        <div id="placeholdersLoadingOverlay"
-                            class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-100">
-                            <div class="glass-effect p-8 rounded-2xl shadow-large flex items-center gap-4">
-                                <div class="loading-spinner"></div>
-                                <div>
-                                    <p class="text-text-primary font-semibold text-lg">Loading Placeholders</p>
-                                    <p class="text-text-secondary text-sm">Please wait while we fetch the
-                                        placeholders...</p>
-                                </div>
+                    <div id="placeholdersLoadingOverlay"
+                        class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-100">
+                        <div class="glass-effect p-8 rounded-2xl shadow-large flex items-center gap-4">
+                            <div class="loading-spinner"></div>
+                            <div>
+                                <p class="text-text-primary font-semibold text-lg">Loading Placeholders</p>
+                                <p class="text-text-secondary text-sm">Please wait while we fetch the
+                                    placeholders...</p>
                             </div>
                         </div>
+                    </div>
 
                     <!-- Placeholders Display -->
                     <div id="placeholdersDisplay" class="hidden">
-                
+
                         <div class="card bg-surface rounded-xl shadow-soft border border-border-light p-6">
                             <div class="flex items-center gap-3 mb-4">
                                 <div
@@ -397,7 +436,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <p class="text-sm text-gray-600 mb-4 bg-gray-50 border-l-4 border-blue-400 p-4 rounded">
+                            <p class="text-sm text-gray-600 mb-4 bg-gray-50 border-l-4 border-green-400 p-4 rounded">
                                 <strong class="block font-medium text-gray-700 mb-1">Note:</strong>
                                 The placeholders listed above are variables detected in your template. Ensure these
                                 match the column names in your uploaded Excel file for successful processing.
@@ -454,7 +493,7 @@
                             </div>
 
                             <button id="generateButton"
-                                class="btn mt-6 w-full bg-primary hover:bg-primary-dark text-white py-3 px-6 rounded-xl font-medium shadow-medium flex items-center justify-center gap-2">
+                                class="btn mt-6 w-full bg-green-500 hover:bg-green-600 text-white py-3 px-6 rounded-xl font-medium shadow-medium flex items-center justify-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9H4m0 0v11h5m-5 0h11m-5-5h5m-5 0a8.001 8.001 0 01-5.418 2H4">
@@ -523,9 +562,9 @@
                 <div id="userManagementSection" class="hidden space-y-8">
                     <!-- Stats Cards -->
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200">
+                        <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border border-green-200">
                             <div class="flex items-center gap-4">
-                                <div class="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center">
+                                <div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center">
                                     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor"
                                         viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -534,8 +573,8 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <p class="text-sm font-medium text-blue-600">Total Users</p>
-                                    <p id="totalUsersCount" class="text-2xl font-bold text-blue-900">-</p>
+                                    <p class="text-sm font-medium text-green-600">Total Users</p>
+                                    <p id="totalUsersCount" class="text-2xl font-bold text-green-900">-</p>
                                 </div>
                             </div>
                         </div>
@@ -559,9 +598,9 @@
                         </div>
 
                         <div
-                            class="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200">
+                            class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border border-green-200">
                             <div class="flex items-center gap-4">
-                                <div class="w-12 h-12 bg-purple-500 rounded-xl flex items-center justify-center">
+                                <div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center">
                                     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor"
                                         viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -570,8 +609,8 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <p class="text-sm font-medium text-purple-600">Regular Users</p>
-                                    <p id="regularUsersCount" class="text-2xl font-bold text-purple-900">-</p>
+                                    <p class="text-sm font-medium text-green-600">Regular Users</p>
+                                    <p id="regularUsersCount" class="text-2xl font-bold text-green-900">-</p>
                                 </div>
                             </div>
                         </div>
@@ -580,11 +619,11 @@
                     <!-- Main User Management Card -->
                     <div class="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
                         <!-- Header -->
-                        <div class="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-6">
+                        <div class="bg-gradient-to-r from-green-600 to-green-600 px-8 py-6">
                             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                                 <div>
                                     <h3 class="text-2xl font-bold text-white tracking-tight">User Management</h3>
-                                    <p class="text-blue-100 mt-1">Manage user access and permissions</p>
+                                    <p class="text-green-100 mt-1">Manage user access and permissions</p>
                                 </div>
                                 <button id="addUserButton"
                                     class="inline-flex items-center gap-2 bg-white bg-opacity-20 hover:bg-opacity-30 backdrop-blur-sm text-white py-3 px-6 rounded-xl font-semibold transition-all duration-200 ease-in-out border border-white border-opacity-30">
@@ -611,12 +650,12 @@
                                             </svg>
                                         </div>
                                         <input id="userSearchInput" type="text" placeholder="Search users by email..."
-                                            class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                            class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
                                     </div>
                                 </div>
                                 <div class="flex gap-2">
                                     <select id="accessFilter"
-                                        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
                                         <option value="">All Access Levels</option>
                                         <option value="admin">Admin</option>
                                         <option value="user">User</option>
@@ -637,7 +676,7 @@
                                         <th scope="col"
                                             class="text-left py-4 px-8 font-semibold text-gray-700 text-sm uppercase tracking-wider">
                                             <div class="flex items-center gap-2">
-                                                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
                                                         stroke-width="2"
@@ -650,7 +689,7 @@
                                         <th scope="col"
                                             class="text-left py-4 px-8 font-semibold text-gray-700 text-sm uppercase tracking-wider">
                                             <div class="flex items-center gap-2">
-                                                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
                                                         stroke-width="2"
@@ -663,7 +702,7 @@
                                         <th scope="col"
                                             class="text-left py-4 px-8 font-semibold text-gray-700 text-sm uppercase tracking-wider">
                                             <div class="flex items-center gap-2">
-                                                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
                                                         stroke-width="2"
@@ -676,7 +715,7 @@
                                         <th scope="col"
                                             class="text-left py-4 px-8 font-semibold text-gray-700 text-sm uppercase tracking-wider">
                                             <div class="flex items-center gap-2">
-                                                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
                                                         stroke-width="2"
@@ -713,7 +752,7 @@
                                 <p class="text-text-secondary">Track all document generation activities</p>
                             </div>
                             <button id="refreshAuditButton"
-                                class="btn bg-secondary hover:bg-blue-600 text-white py-2 px-4 rounded-lg font-medium flex items-center gap-2">
+                                class="btn bg-secondary hover:bg-green-600 text-white py-2 px-4 rounded-lg font-medium flex items-center gap-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9H4m0 0v11h5m-5 0h11m-5-5h5m-5 0a8.001 8.001 0 01-5.418 2H4">
@@ -858,7 +897,7 @@
         </div>
     </div>
 
-    <script src="/static/script.js"></script>
+    <script type="module" src="/static/main.js"></script>
 </body>
 
 </html>
