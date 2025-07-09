@@ -228,7 +228,7 @@
                             class="w-full p-3 border border-border-medium rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-surface">
                             <option value="">Select Output Format</option>
                             <option value="zip">Download as ZIP file</option>
-                            <option disabled value="print">Print directly</option>
+                            <option value="print">Print directly</option>
                         </select>
 
                         <!-- Format info messages -->
@@ -244,7 +244,8 @@
                             </div>
                         </div>
 
-                        <div id="printFormatInfo" class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 hidden">
+                        <div id="printFormatInfo"
+                            class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 hidden">
                             <div class="flex items-center gap-2">
                                 <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
@@ -529,27 +530,30 @@
                             </div>
 
                             <!-- Result Section -->
-                            <div id="resultSection" class="hidden mt-6 flex flex-col sm:flex-row gap-3">
-                                <div id="resultMessage" class="flex-1 text-text-secondary"></div>
-                                <div class="flex gap-3">
-                                    <button id="downloadButton"
-                                        class="btn hidden bg-success hover:bg-green-600 text-white py-2 px-4 rounded-lg font-medium flex items-center gap-2">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4">
-                                            </path>
-                                        </svg>
-                                        Download ZIP
-                                    </button>
-                                    <button id="cleanupButton"
-                                        class="btn hidden bg-error hover:bg-red-600 text-white py-2 px-4 rounded-lg font-medium flex items-center gap-2">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5-4h4a1 1 0 011 1v1H9V4a1 1 0 011-1z">
-                                            </path>
-                                        </svg>
-                                        Generate Again
-                                    </button>
+                            <div id="resultSection" class="hidden mt-6">
+                                <div class="bg-gray-800 text-white rounded-t-lg px-4 py-2">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-3 h-3 bg-green-400 rounded-full"></div>
+                                        <div class="w-3 h-3 bg-yellow-400 rounded-full"></div>
+                                        <div class="w-3 h-3 bg-red-400 rounded-full"></div>
+                                        <span class="ml-2 text-sm font-mono">Terminal Output</span>
+                                    </div>
+                                </div>
+
+                                <div class="bg-gray-900 text-green-400 rounded-b-lg p-4 font-mono text-sm">
+                                    <div id="resultMessage" class="mb-3">$ Processing complete...</div>
+
+                                    <div class="flex gap-2 text-xs">
+                                        <button id="downloadButton"
+                                            class="hidden bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded border border-gray-600 transition-colors">
+                                            [D] Download
+                                        </button>
+
+                                        <button id="cleanupButton"
+                                            class="hidden bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded border border-gray-600 transition-colors">
+                                            [G] Generate Again
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -562,7 +566,8 @@
                 <div id="userManagementSection" class="hidden space-y-8">
                     <!-- Stats Cards -->
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border border-green-200">
+                        <div
+                            class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border border-green-200">
                             <div class="flex items-center gap-4">
                                 <div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center">
                                     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor"

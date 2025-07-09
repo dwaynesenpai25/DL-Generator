@@ -293,3 +293,133 @@
     background-color: rgba(59, 130, 246, 0.15);
     border-right: 3px solid #3b82f6;
 }
+
+/* Watermark Overlay Styles */
+.watermark-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.watermark-pattern {
+  position: absolute;
+  width: 120%;
+  height: 120%;
+  top: -10%;
+  left: -10%;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 200px,
+    rgba(0, 0, 0, 0.03) 200px,
+    rgba(0, 0, 0, 0.03) 250px
+  );
+  animation: watermark-drift 60s linear infinite;
+}
+
+.watermark-text {
+  position: absolute;
+  font-family: "Arial", sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.08);
+  transform: rotate(-25deg);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.5);
+}
+
+/* Responsive watermark text sizes */
+@media (max-width: 768px) {
+  .watermark-text {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .watermark-text {
+    font-size: 14px;
+  }
+}
+
+/* Animation for subtle movement */
+@keyframes watermark-drift {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(-5px, -5px) rotate(0.5deg);
+  }
+  50% {
+    transform: translate(5px, -10px) rotate(-0.5deg);
+  }
+  75% {
+    transform: translate(-10px, 5px) rotate(0.3deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+/* Dark mode watermark */
+.watermark-overlay.dark-mode .watermark-text {
+  color: rgba(255, 255, 255, 0.08);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.watermark-overlay.dark-mode .watermark-pattern {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 200px,
+    rgba(255, 255, 255, 0.03) 200px,
+    rgba(255, 255, 255, 0.03) 250px
+  );
+}
+
+/* High contrast mode for better visibility when needed */
+.watermark-overlay.high-contrast .watermark-text {
+  color: rgba(0, 0, 0, 0.15);
+  font-weight: 700;
+}
+
+/* Print styles - make watermark more visible on print */
+@media print {
+  .watermark-overlay {
+    position: fixed !important;
+    z-index: 9999 !important;
+  }
+
+  .watermark-text {
+    color: rgba(0, 0, 0, 0.2) !important;
+    font-weight: 700 !important;
+  }
+}
+
+/* Prevent watermark from being hidden */
+.watermark-overlay {
+  visibility: visible !important;
+  display: block !important;
+  opacity: 1 !important;
+}
+
+/* Additional security - prevent tampering */
+.watermark-overlay * {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}

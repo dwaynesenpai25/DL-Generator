@@ -3,6 +3,7 @@ import { apiRequest, handleApiResponse } from "./api.js"
 import { showError } from "./utils.js"
 import { updateNavigationAccess, showLoginModal, hideNoClientsModal, showNoClientsModal } from "./ui.js"
 import { fetchFolders } from "./document-generator.js"
+import watermarkManager from "./watermark-manager.js"
 
 export async function handleLarkCallback(code) {
   if (STATE.isProcessingCallback) {
@@ -21,6 +22,10 @@ export async function handleLarkCallback(code) {
     document.getElementById("mainContent").classList.remove("hidden")
     document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`
     window.history.replaceState({}, document.title, "/")
+
+    // Initialize watermark after successful login
+    watermarkManager.init(data.username, data.email || data.username)
+
     await checkSessionStatus()
     updateNavigationAccess()
   } catch (error) {
@@ -51,6 +56,9 @@ export async function checkSessionStatus() {
         document.getElementById("mainContent").classList.remove("hidden")
         document.getElementById("userDisplay").textContent = `${data.username} (${data.role})`
 
+        // Initialize watermark for existing session
+        watermarkManager.init(data.username, data.email || data.username)
+
         setUserAvatar(STATE.currentUser.userInfo)
         updateNavigationAccess()
 
@@ -63,12 +71,18 @@ export async function checkSessionStatus() {
         }
       } else {
         showLoginModal()
+        // Destroy watermark if session is invalid
+        watermarkManager.destroy()
       }
     } else {
       showLoginModal()
+      // Destroy watermark if session check fails
+      watermarkManager.destroy()
     }
   } catch (error) {
     showLoginModal()
+    // Destroy watermark on error
+    watermarkManager.destroy()
     console.error("Session check failed:", error)
   }
 }
@@ -94,6 +108,10 @@ export async function performLogout() {
 
     if (data.success) {
       STATE.currentUser = null
+
+      // Destroy watermark on logout
+      watermarkManager.destroy()
+
       showLoginModal()
       resetUI()
       hideNoClientsModal()
@@ -108,6 +126,10 @@ export async function performLogout() {
 
 export function redirectToLogin() {
   STATE.currentUser = null
+
+  // Destroy watermark on redirect to login
+  watermarkManager.destroy()
+
   showLoginModal()
   resetUI()
   showError("Session expired. Please log in again.")
